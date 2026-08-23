@@ -45,53 +45,16 @@
 
 ;; --- rows-vs-update-count dispatch --------------------------------------
 
-(defn- skip-quoted
-  "Index just past the delimiter closing the quote opened at i, treating ''
-   as an escaped quote when the delimiter is '. Unterminated quotes run to
-   the end."
-  [s open i]
-  (let [n (count s)]
-    (loop [j (inc i)]
-      (let [k (string/index-of s open j)]
-        (cond
-          (nil? k) n
-          (and (= open "'")
-               (< (inc k) n)
-               (= (subs s (inc k) (+ k 2)) "'")) (recur (+ k 2))
-          :else (inc k))))))
+(def ^:private head-keyword-re
+  ;; the first keyword, past leading whitespace and SQL comments
+  #"(?is)^(?:\s|--[^\n]*\n?|/\*.*?\*/)*([A-Za-z]+)")
 
-(defn- next-token
-  "[index kind] of the first quote or comment opener at or after i, else nil.
-   kind is :line, :block, :squote, or :dquote."
-  [s i]
-  (let [cands [[(string/index-of s "--" i) :line]
-               [(string/index-of s "/*" i) :block]
-               [(string/index-of s "'" i) :squote]
-               [(string/index-of s "\"" i) :dquote]]
-        hits (filter #(some? (first %)) cands)]
-    (when (seq hits)
-      (reduce (fn [a b] (if (<= (first a) (first b)) a b)) hits))))
-
-(defn- scrub
-  "The statement with '...' literals (with '' escapes), \"...\" quoted
-   identifiers, -- line comments, and /* */ block comments each collapsed to
-   a single space, so their contents cannot fake a keyword match. One
-   left-to-right scan jumping between tokens, so a quote opened first hides
-   comment markers inside it and vice versa."
-  [s]
-  (let [n (count s)]
-    (loop [i 0 out ""]
-      (if-let [[k kind] (next-token s i)]
-        (let [out (str out (subs s i k) " ")
-              j (case kind
-                  :line (let [e (string/index-of s "\n" (+ k 2))]
-                          (if e (inc e) n))
-                  :block (let [e (string/index-of s "*/" (+ k 2))]
-                           (if e (+ e 2) n))
-                  :squote (skip-quoted s "'" k)
-                  :dquote (skip-quoted s "\"" k))]
-          (recur j out))
-        (str out (subs s i))))))
+(def ^:private returning-token-re
+  ;; One linear RE2 scan. '...' literals (with '' escapes), "..." quoted
+  ;; identifiers, and comments are alternatives tried before a bare
+  ;; RETURNING, so at any position their whole span wins the match and the
+  ;; word inside them never surfaces as its own token.
+  #"(?is)'(?:[^']|'')*'|\"[^\"]*\"|--[^\n]*|/\*.*?\*/|\breturning\b")
 
 (def ^:private rows-keywords
   #{"select" "with" "values" "table" "show" "explain"})
@@ -106,11 +69,12 @@
    INSERT/UPDATE/DELETE takes the rows path anyway — pass
    {:returns :update-count} to override."
   [q]
-  (let [t (string/triml (scrub q))
-        kw (some-> (re-find #"^[A-Za-z]+" t) string/lower-case)]
-    (boolean
-      (or (contains? rows-keywords kw)
-          (re-find #"(?i)\breturning\b" t)))))
+  (boolean
+    (or (contains? rows-keywords
+                   (some-> (second (re-find head-keyword-re q))
+                           string/lower-case))
+        (some #(= "returning" (string/lower-case %))
+              (re-seq returning-token-re q)))))
 
 (defn- rows-path?
   "The :returns override when present, else the returns-rows? heuristic."
