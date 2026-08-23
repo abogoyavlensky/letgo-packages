@@ -1,28 +1,102 @@
-;; End-to-end exercise of the sqlite wrapper: create, insert, read back.
+;; End-to-end exercise of the sqlite driver package over the sql layer:
+;; every API entry point, plus type round-trips asserted as native values.
 (ns main
   (:require [sqlite.core :as db]))
 
 (def ^:private path "/tmp/lgx-sqlite-example.db")
 
+(defn- check [label ok]
+  (if ok
+    (println " ✓" label)
+    (do (println " ✗" label)
+        (throw (ex-info (str "assertion failed: " label) {})))))
+
 (defn -main []
   (let [conn (db/open path)]
     (try
+      ;; execute! for DDL
       (db/execute! conn ["drop table if exists people"])
       (db/execute! conn ["create table people (id integer primary key,
                                                name text not null,
-                                               age integer)"])
-      (println "inserted:"
-               (db/execute! conn ["insert into people (name, age) values (?, ?)"
-                                  "Ada" 36]))
-      (println "inserted:"
-               (db/execute! conn ["insert into people (name, age) values (?, ?)"
-                                  "Grace" 45]))
-      (println "all rows:")
-      (doseq [row (db/query conn ["select id, name, age from people
-                                  order by id"])]
-        (println " " row))
-      (println "filtered:"
-               (db/query conn ["select name from people where age > ?" 40]))
+                                               age integer,
+                                               height real,
+                                               active boolean,
+                                               notes text)"])
+
+      ;; execute! for parameterized inserts -> [{:sql/update-count n}]
+      (let [r (db/execute! conn ["insert into people (name, age, height, active, notes)
+                                  values (?, ?, ?, ?, ?)"
+                                 "Ada" 36 1.63 true nil])]
+        (check "insert returns [{:sql/update-count 1}]"
+               (= [{:sql/update-count 1}] r)))
+      (db/execute! conn ["insert into people (name, age, height, active, notes)
+                          values (?, ?, ?, ?, ?)"
+                         "Grace" 45 1.5 false "COBOL"])
+
+      ;; query (sugar for execute!) -> vector of row maps
+      (let [rows (db/query conn ["select id, name, age, height, active, notes
+                                  from people order by id"])]
+        (check "query returns two rows" (= 2 (count rows)))
+        (let [ada (first rows)]
+          ;; native let-go values, not opaque boxes
+          (check "text is a native string" (= "Ada" (:name ada)))
+          (check "integer round-trips" (= 36 (:age ada)))
+          (check "float round-trips" (= 1.63 (:height ada)))
+          (check "boolean round-trips (sqlite stores 1)" (= 1 (:active ada)))
+          (check "NULL is nil" (nil? (:notes ada)))
+          (check "id was assigned" (= 1 (:id ada)))))
+
+      ;; execute-one! -> first row or nil
+      (let [grace (db/execute-one! conn ["select name, active, notes from people
+                                          where age > ?" 40])]
+        (check "execute-one! returns the row map" (= "Grace" (:name grace)))
+        (check "false round-trips (sqlite stores 0)" (= 0 (:active grace)))
+        (check "text round-trips" (= "COBOL" (:notes grace))))
+      (check "execute-one! is nil on empty result"
+             (nil? (db/execute-one! conn ["select * from people where age > ?" 99])))
+
+      ;; execute-one! on DML -> {:sql/update-count n}
+      (let [r (db/execute-one! conn ["update people set notes = ? where name = ?"
+                                     "analytical engine" "Ada"])]
+        (check "execute-one! DML returns {:sql/update-count 1}"
+               (= {:sql/update-count 1} r)))
+
+      ;; with-transaction committing
+      (db/with-transaction [tx conn]
+        (db/execute! tx ["insert into people (name, age) values (?, ?)" "Edsger" 72])
+        (db/execute! tx ["update people set age = ? where name = ?" 37 "Ada"]))
+      (check "transaction committed"
+             (= 3 (:n (db/execute-one! conn ["select count(*) as n from people"]))))
+      (check "update inside transaction landed"
+             (= 37 (:age (db/execute-one! conn ["select age from people where name = ?"
+                                                "Ada"]))))
+
+      ;; with-transaction rolling back on a throw
+      (let [thrown (try
+                     (db/with-transaction [tx conn]
+                       (db/execute! tx ["insert into people (name, age) values (?, ?)"
+                                        "Nobody" 1])
+                       (throw (ex-info "boom" {}))
+                       :not-reached)
+                     (catch Throwable e (ex-message e)))]
+        (check "the body's exception is rethrown" (= "boom" thrown)))
+      (check "rollback undid the insert"
+             (nil? (db/execute-one! conn ["select * from people where name = ?"
+                                          "Nobody"])))
+
+      ;; per-call opts: :keys override
+      (let [row (db/execute-one! conn ["select name as MixedCase from people
+                                        where name = ?" "Ada"]
+                                 {:keys :unqualified-lower})]
+        (check ":keys :unqualified-lower lower-cases columns"
+               (= "Ada" (:mixedcase row))))
+
+      ;; :returns override forces the update-count path
+      (let [r (db/execute! conn ["select 1"] {:returns :update-count})]
+        (check "{:returns :update-count} overrides the heuristic"
+               (= :sql/update-count (first (keys (first r))))))
+
+      (println "all checks passed")
       (finally (db/close! conn)))))
 
-(-main)
+(when-not *compiling-aot* (-main))
