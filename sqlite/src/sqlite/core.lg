@@ -1,63 +1,42 @@
-;; sqlite.core — a small, idiomatic veneer over Go's database/sql, driven by
-;; the pure-Go modernc.org/sqlite driver.
+;; sqlite.core — the sqlite driver package: open/close! plus re-exports of
+;; the driver-agnostic sql.core API, so a consumer needs one require.
 ;;
-;; The layers underneath, from the bottom up:
-;;
-;;   modernc.org/sqlite  registers itself as the "sqlite" driver (link-only)
-;;   database/sql        generated bindings — sql/Open, and reflective method
-;;                       dispatch on *sql.DB / *sql.Rows / sql.Result
-;;   sqlite.shim         the three things generation cannot do: Scan's
-;;                       out-parameters, and spreading a parameter vector into
-;;                       a variadic Go method
-;;   sqlite.core         this file — the API you would actually want to use
-;;
-;; Statements are taken as a [sql-string & params] vector, which is what
-;; HoneySQL's `format` returns.
+;; The driver is modernc.org/sqlite (pure Go), which registers itself with
+;; database/sql as "sqlite" when the runtime links it.
 (ns sqlite.core
   (:require [sql]
-            [sqlite.shim :as shim]))
+            [sql.core]))
 
 (def ^:private driver "sqlite")
 
 (defn open
-  "Open the sqlite database at `path`. Use \":memory:\" for an in-memory one.
-   Returns a database handle to pass to the fns below."
-  [path]
-  (sql/Open driver path))
+  "Open the sqlite database at `path` (\":memory:\" for an in-memory one).
+   Returns a connectable for the fns below. opts become the connection's
+   defaults — e.g. {:keys :unqualified-lower} — merged under per-call opts."
+  ([path] (open path nil))
+  ([path opts]
+   {:sql/handle (sql/Open driver path)
+    :sql/opts (merge {:keys :unqualified} opts)}))
 
 (defn close!
-  "Close a database handle. Returns the error as a value, nil on success."
-  [db]
-  (.Close db))
+  "Close a connectable (or bare handle). Returns the close error as a
+   value, nil on success."
+  [conn]
+  (.Close (if (map? conn) (:sql/handle conn) conn)))
 
-(defn- split-statement
-  "A [sql-string & params] vector as [q params-vector]."
-  [statement]
-  [(first statement) (vec (rest statement))])
+(def execute!
+  "See sql.core/execute!."
+  sql.core/execute!)
 
-(defn- row-seq [rows cols]
-  (lazy-seq
-    (when (.Next rows)
-      (cons (zipmap cols (shim/ScanRow rows))
-            (row-seq rows cols)))))
+(def execute-one!
+  "See sql.core/execute-one!."
+  sql.core/execute-one!)
 
-(defn query
-  "Run a [sql-string & params] statement and return its rows as a vector of
-   column-keyword -> value maps."
-  [db statement]
-  (let [[q params] (split-statement statement)
-        rows (shim/Query db q params)]
-    (try
-      (let [cols (mapv keyword (.Columns rows))]
-        ;; Realized before the finally closes the cursor: the seq reads
-        ;; through `rows`, so a lazy one would be reading a closed handle.
-        (vec (doall (row-seq rows cols))))
-      (finally (.Close rows)))))
+(def query
+  "See sql.core/query."
+  sql.core/query)
 
-(defn execute!
-  "Run a [sql-string & params] statement for effect. Returns
-   {:rows-affected n}."
-  [db statement]
-  (let [[q params] (split-statement statement)
-        r (shim/Exec db q params)]
-    {:rows-affected (.RowsAffected r)}))
+(defmacro with-transaction
+  "See sql.core/with-transaction."
+  [bindings & body]
+  `(sql.core/with-transaction ~bindings ~@body))

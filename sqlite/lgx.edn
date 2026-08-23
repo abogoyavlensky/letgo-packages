@@ -1,12 +1,9 @@
 {:paths ["src"]
 
- :deps {;; Bindings for the stdlib API the veneer sits on.
-        database/sql {:go/interop "sql"}
+ :deps {;; The driver-agnostic layer: database/sql bindings, the shim, and
+        ;; the sql.core veneer all arrive transitively from here.
+        abogoyavlensky/letgo-sql {:local/root "../sql"}
 
         ;; Pure Go, so no cgo, no C compiler, and clean cross-builds.
         ;; Link-only: it registers itself with database/sql from init.
-        modernc.org/sqlite {:go/version "v1.57.0"}
-
-        ;; The hand-written seam. :go/local while the wrapper is unreleased;
-        ;; becomes {:go/version "vX.Y.Z"} when it is tagged.
-        github.com/abogoyavlensky/letgo-packages/sqlite/shim {:go/local "shim"}}}
+        modernc.org/sqlite {:go/version "v1.57.0"}}}
