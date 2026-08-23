@@ -1,0 +1,217 @@
+;; sql.core — a driver-agnostic, next.jdbc-shaped veneer over Go's
+;; database/sql. Works with any registered driver; the sqlite and postgres
+;; packages supply one and re-export this API.
+;;
+;; The layers underneath, from the bottom up:
+;;
+;;   <driver>      registers itself with database/sql (link-only)
+;;   database/sql  generated bindings — sql/Open, and reflective method
+;;                 dispatch on *sql.DB / *sql.Tx / *sql.Rows / sql.Result
+;;   sql.shim      what generation cannot do: Scan's out-parameters,
+;;                 spreading a parameter vector into a variadic method, and
+;;                 the Connectable interface unifying *sql.DB and *sql.Tx
+;;   sql.core      this file — the API you would actually want to use
+;;
+;; Statements are [sql-string & params] vectors — the shape HoneySQL's
+;; `format` returns.
+;;
+;; A *connectable* is either a map {:sql/handle h :sql/opts m} (what open
+;; returns, and what with-transaction binds) or a bare boxed *sql.DB /
+;; *sql.Tx, treated as {:sql/handle h :sql/opts {}}.
+(ns sql.core
+  (:require [sql.shim :as shim]))
+
+;; --- connectable normalization ------------------------------------------
+
+(defn- normalize
+  "Any accepted connectable as the canonical map shape."
+  [connectable]
+  (if (and (map? connectable) (contains? connectable :sql/handle))
+    connectable
+    {:sql/handle connectable :sql/opts {}}))
+
+;; --- result keys ---------------------------------------------------------
+
+(defn- key-fn
+  "The :keys option as a String -> keyword function."
+  [k]
+  (cond
+    (or (nil? k) (= :unqualified k)) keyword
+    (= :unqualified-lower k) (fn [s] (keyword (string/lower-case s)))
+    (fn? k) k
+    :else (throw (ex-info (str ":keys must be :unqualified, :unqualified-lower,"
+                               " or a String -> keyword fn, got: " (pr-str k))
+                          {:keys k}))))
+
+;; --- rows-vs-update-count dispatch --------------------------------------
+
+(defn- strip-leading-noise
+  "Text after any leading whitespace, -- line comments, and /* */ block
+   comments."
+  [s]
+  (loop [s s]
+    (let [t (string/triml s)]
+      (cond
+        (string/starts-with? t "--")
+        (if-let [i (string/index-of t "\n")]
+          (recur (subs t (inc i)))
+          "")
+
+        (string/starts-with? t "/*")
+        (if-let [i (string/index-of t "*/")]
+          (recur (subs t (+ i 2)))
+          "")
+
+        :else t))))
+
+(defn- strip-quoted
+  "The statement with '...' literals (with '' escapes) and \"...\" quoted
+   identifiers emptied, so their contents cannot fake a keyword match."
+  [s]
+  (-> s
+      (string/replace #"'(?:[^']|'')*'" "''")
+      (string/replace #"\"[^\"]*\"" "\"\"")))
+
+(def ^:private rows-keywords
+  #{"select" "with" "values" "table" "show" "explain"})
+
+(defn returns-rows?
+  "Heuristic: does this statement produce a result set?
+
+   True when the first keyword (after leading whitespace and SQL comments)
+   is SELECT, WITH, VALUES, TABLE, SHOW, or EXPLAIN, or when the statement
+   carries a RETURNING clause outside any string literal. Known false
+   positive: a WITH whose final clause is a bare INSERT/UPDATE/DELETE takes
+   the rows path anyway — pass {:returns :update-count} to override."
+  [q]
+  (let [t (strip-leading-noise q)
+        kw (some-> (re-find #"^[A-Za-z]+" t) string/lower-case)]
+    (boolean
+      (or (contains? rows-keywords kw)
+          (re-find #"(?i)\breturning\b" (strip-quoted t))))))
+
+(defn- rows-path?
+  "The :returns override when present, else the returns-rows? heuristic."
+  [q opts]
+  (let [r (:returns opts)]
+    (cond
+      (= r :rows) true
+      (= r :update-count) false
+      (nil? r) (returns-rows? q)
+      :else (throw (ex-info (str ":returns must be :rows or :update-count,"
+                                 " got: " (pr-str r))
+                            {:returns r})))))
+
+;; --- execution -----------------------------------------------------------
+
+(defn- split-statement
+  "A [sql-string & params] vector as [q params-vector]."
+  [statement]
+  [(first statement) (vec (rest statement))])
+
+(defn- read-rows!
+  "Realize a *sql.Rows cursor as a vector of maps keyed by (kf column-name),
+   closing the cursor. (.Next rows) returns false for both end-of-rows and a
+   mid-stream read failure, so (.Err rows) is checked once iteration stops —
+   otherwise a truncated result set would look like success."
+  [rows kf]
+  (try
+    (let [cols (mapv kf (.Columns rows))]
+      (loop [acc []]
+        (if (.Next rows)
+          (recur (conj acc (zipmap cols (shim/ScanRow rows))))
+          (do
+            (when-let [err (.Err rows)]
+              (throw (ex-info (str "sql: reading rows failed: " err)
+                              {:sql/error err})))
+            acc))))
+    (finally (.Close rows))))
+
+(defn- execute*
+  "Shared body of execute! and execute-one!: {:rows [...]} on the rows path,
+   {:update-count n} on the update-count path."
+  [connectable statement opts]
+  (let [conn (normalize connectable)
+        opts (merge (:sql/opts conn) opts)
+        [q params] (split-statement statement)
+        handle (:sql/handle conn)]
+    (if (rows-path? q opts)
+      {:rows (read-rows! (shim/Query handle q params) (key-fn (:keys opts)))}
+      {:update-count (.RowsAffected (shim/Exec handle q params))})))
+
+(defn execute!
+  "Run a [sql-string & params] statement. A statement producing a result set
+   (per returns-rows?, overridable with {:returns ...} in opts) returns a
+   vector of column-keyword -> value maps; anything else returns
+   [{:sql/update-count n}]. Per-call opts merge over the connectable's."
+  ([connectable statement] (execute! connectable statement nil))
+  ([connectable statement opts]
+   (let [r (execute* connectable statement opts)]
+     (if (contains? r :rows)
+       (:rows r)
+       [{:sql/update-count (:update-count r)}]))))
+
+(defn execute-one!
+  "Like execute!, but returns the first row map (nil for an empty result
+   set), or {:sql/update-count n} on the update-count path."
+  ([connectable statement] (execute-one! connectable statement nil))
+  ([connectable statement opts]
+   (let [r (execute* connectable statement opts)]
+     (if (contains? r :rows)
+       (first (:rows r))
+       {:sql/update-count (:update-count r)}))))
+
+(defn query
+  "Sugar for execute!."
+  ([connectable statement] (execute! connectable statement))
+  ([connectable statement opts] (execute! connectable statement opts)))
+
+;; --- transactions --------------------------------------------------------
+
+(defn begin-tx
+  "Internal (with-transaction's runtime). Begin a transaction, returning a
+   tx connectable carrying the parent's opts. Throws if `connectable` is
+   already a transaction — database/sql has no savepoints, so nesting would
+   silently open a second independent transaction."
+  [connectable]
+  (let [conn (normalize connectable)]
+    (when (:sql/tx? conn)
+      (throw (ex-info "with-transaction does not nest: database/sql has no savepoint API"
+                      {:sql/connectable conn})))
+    {:sql/handle (.Begin (:sql/handle conn))
+     :sql/opts (or (:sql/opts conn) {})
+     :sql/tx? true}))
+
+(defn commit-tx!
+  "Internal (with-transaction's runtime). Commit, throwing on a non-nil
+   error — Commit returns its error as a value, and silently dropping a
+   failed commit would let the caller believe the write landed."
+  [tx-connectable]
+  (when-let [err (.Commit (:sql/handle tx-connectable))]
+    (throw (ex-info (str "sql: commit failed: " err) {:sql/error err}))))
+
+(defn rollback-tx!
+  "Internal (with-transaction's runtime). Roll back; a rollback error is
+   reported on *err* rather than thrown, so it never masks the body's
+   exception — the original failure is the useful one."
+  [tx-connectable]
+  (when-let [err (.Rollback (:sql/handle tx-connectable))]
+    (write! *err* (str "sql: rollback failed: " err "\n"))))
+
+(defmacro with-transaction
+  "(with-transaction [tx connectable] body...) — begin a transaction, bind it
+   to `tx` (a connectable carrying the parent's opts), and run the body.
+   Commits on normal return and returns the body's value; rolls back and
+   rethrows on a throw. Does not nest — see begin-tx."
+  [bindings & body]
+  (let [tx-sym (first bindings)
+        conn (second bindings)]
+    `(let [~tx-sym (begin-tx ~conn)]
+       (let [out# (try
+                    {:ok (do ~@body)}
+                    (catch Throwable e# {:err e#}))]
+         (if (contains? out# :err)
+           (do (rollback-tx! ~tx-sym)
+               (throw (:err out#)))
+           (do (commit-tx! ~tx-sym)
+               (:ok out#)))))))

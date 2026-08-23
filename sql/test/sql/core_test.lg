@@ -1,0 +1,50 @@
+;; Unit tests for sql.core's returns-rows? — the one pure fn whose behavior a
+;; caller cannot predict from a signature.
+;; Run with: lgx test  (from sql/, with a runtime carrying sql.shim)
+
+(ns sql.core-test
+  (:require [sql.core :as sql]
+            [clojure.test :refer [deftest is]]))
+
+(deftest plain-select
+  (is (sql/returns-rows? "select 1")))
+
+(deftest leading-whitespace
+  (is (sql/returns-rows? "   \n\t select * from t")))
+
+(deftest leading-line-comment
+  (is (sql/returns-rows? "-- fetch them all\nselect * from t")))
+
+(deftest leading-block-comment
+  (is (sql/returns-rows? "/* fetch\n them */ select * from t")))
+
+(deftest mixed-case
+  (is (sql/returns-rows? "SeLeCt * from t")))
+
+(deftest each-rows-keyword
+  (is (sql/returns-rows? "with x as (select 1) select * from x"))
+  (is (sql/returns-rows? "values (1), (2)"))
+  (is (sql/returns-rows? "table t"))
+  (is (sql/returns-rows? "show tables"))
+  (is (sql/returns-rows? "explain select 1")))
+
+(deftest dml-is-not-rows
+  (is (not (sql/returns-rows? "insert into t (x) values (1)")))
+  (is (not (sql/returns-rows? "update t set x = 1")))
+  (is (not (sql/returns-rows? "delete from t")))
+  (is (not (sql/returns-rows? "create table t (x integer)"))))
+
+(deftest trailing-returning
+  (is (sql/returns-rows? "insert into t (x) values (1) returning id"))
+  (is (sql/returns-rows? "delete from t where x = 1 RETURNING *")))
+
+(deftest returning-inside-string-literal
+  (is (not (sql/returns-rows? "insert into t (x) values ('returning')")))
+  (is (not (sql/returns-rows? "insert into t (x) values ('a '' returning b')"))))
+
+(deftest returning-as-substring-of-identifier
+  (is (not (sql/returns-rows? "update t set returningish = 1"))))
+
+(deftest known-with-insert-false-positive
+  ;; Documented: a WITH whose final clause is DML still takes the rows path.
+  (is (sql/returns-rows? "with x as (select 1) insert into t select * from x")))
