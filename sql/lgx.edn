@@ -1,0 +1,10 @@
+{:paths ["src"]
+
+ :deps {;; Bindings for the stdlib API the veneer sits on. No driver here —
+        ;; that is what keeps this package driver-agnostic; drivers (sqlite,
+        ;; postgres) depend on this package and add their own.
+        database/sql {:go/interop "sql"}
+
+        ;; The hand-written seam. :go/local while the wrapper is unreleased;
+        ;; becomes {:go/version "vX.Y.Z"} when it is tagged.
+        github.com/abogoyavlensky/letgo-packages/sql/shim {:go/local "shim"}}}
