@@ -47,17 +47,22 @@ decides heuristically:
 3. Otherwise - update count.
 
 Known false positive: a `WITH ... INSERT` CTE matches rule 1 and takes
-the rows path. `{:returns :rows}` or `{:returns :update-count}` in opts
-overrides the heuristic outright; use it for anything the keyword match
-gets wrong.
+the rows path. The scanner recognizes standard `'...'` literals, `"..."`
+identifiers, and `--`/`/* */` comments, but not driver-specific quoting -
+a Postgres dollar-quoted string (`$$returning$$`) or a SQLite
+bracket/backtick identifier containing the word `returning` fools rule 2.
+`{:returns :rows}` or `{:returns :update-count}` in opts overrides the
+heuristic outright; use it for anything the scan gets wrong.
 
 ### Result keys
 
-Row keys are unqualified keywords (`:name`, never `:people/name`). This
-is a constraint of the platform, not a style choice: Go's
-`sql.ColumnType` exposes the column name and nothing about its table,
-so table-qualified keys cannot be built for any driver. The `:keys`
-option controls the transform from column name to keyword:
+Row keys are unqualified keywords by default (`:name`, not
+`:people/name`). Automatic table qualification is a constraint of the
+platform, not a style choice: Go's `sql.ColumnType` exposes the column
+name and nothing about its table, so this layer cannot build
+`:people/name` for any driver. (A custom `:keys` function, or a column
+aliased to a name containing `/`, can still produce qualified keywords.)
+The `:keys` option controls the transform from column name to keyword:
 
 - `:unqualified` (default) - verbatim
 - `:unqualified-lower` - lower-cased first (the postgres package's
