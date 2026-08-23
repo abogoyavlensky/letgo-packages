@@ -45,32 +45,47 @@
 
 ;; --- rows-vs-update-count dispatch --------------------------------------
 
-(defn- strip-leading-noise
-  "Text after any leading whitespace, -- line comments, and /* */ block
-   comments."
+(defn- skip-quoted
+  "Index just past the delimiter closing the quote opened at i, treating ''
+   as an escaped quote when the delimiter is '. Unterminated quotes run to
+   the end."
+  [s open i]
+  (let [n (count s)]
+    (loop [j (inc i)]
+      (let [k (string/index-of s open j)]
+        (cond
+          (nil? k) n
+          (and (= open "'")
+               (< (inc k) n)
+               (= (subs s (inc k) (+ k 2)) "'")) (recur (+ k 2))
+          :else (inc k))))))
+
+(defn- scrub
+  "The statement with '...' literals (with '' escapes), \"...\" quoted
+   identifiers, -- line comments, and /* */ block comments each collapsed to
+   a single space, so their contents cannot fake a keyword match. One
+   left-to-right scan, so a quote opened first hides comment markers inside
+   it and vice versa."
   [s]
-  (loop [s s]
-    (let [t (string/triml s)]
-      (cond
-        (string/starts-with? t "--")
-        (if-let [i (string/index-of t "\n")]
-          (recur (subs t (inc i)))
-          "")
+  (let [n (count s)]
+    (loop [i 0 out ""]
+      (if (>= i n)
+        out
+        (let [c (subs s i (inc i))
+              c2 (when (< (inc i) n) (subs s i (+ i 2)))]
+          (cond
+            (= c2 "--")
+            (let [j (string/index-of s "\n" (+ i 2))]
+              (recur (if j (inc j) n) (str out " ")))
 
-        (string/starts-with? t "/*")
-        (if-let [i (string/index-of t "*/")]
-          (recur (subs t (+ i 2)))
-          "")
+            (= c2 "/*")
+            (let [j (string/index-of s "*/" (+ i 2))]
+              (recur (if j (+ j 2) n) (str out " ")))
 
-        :else t))))
+            (or (= c "'") (= c "\""))
+            (recur (skip-quoted s c i) (str out " "))
 
-(defn- strip-quoted
-  "The statement with '...' literals (with '' escapes) and \"...\" quoted
-   identifiers emptied, so their contents cannot fake a keyword match."
-  [s]
-  (-> s
-      (string/replace #"'(?:[^']|'')*'" "''")
-      (string/replace #"\"[^\"]*\"" "\"\"")))
+            :else (recur (inc i) (str out c))))))))
 
 (def ^:private rows-keywords
   #{"select" "with" "values" "table" "show" "explain"})
@@ -80,15 +95,16 @@
 
    True when the first keyword (after leading whitespace and SQL comments)
    is SELECT, WITH, VALUES, TABLE, SHOW, or EXPLAIN, or when the statement
-   carries a RETURNING clause outside any string literal. Known false
-   positive: a WITH whose final clause is a bare INSERT/UPDATE/DELETE takes
-   the rows path anyway — pass {:returns :update-count} to override."
+   carries a RETURNING clause outside any string literal, quoted identifier,
+   or comment. Known false positive: a WITH whose final clause is a bare
+   INSERT/UPDATE/DELETE takes the rows path anyway — pass
+   {:returns :update-count} to override."
   [q]
-  (let [t (strip-leading-noise q)
+  (let [t (string/triml (scrub q))
         kw (some-> (re-find #"^[A-Za-z]+" t) string/lower-case)]
     (boolean
       (or (contains? rows-keywords kw)
-          (re-find #"(?i)\breturning\b" (strip-quoted t))))))
+          (re-find #"(?i)\breturning\b" t)))))
 
 (defn- rows-path?
   "The :returns override when present, else the returns-rows? heuristic."
@@ -127,16 +143,33 @@
             acc))))
     (finally (.Close rows))))
 
+(defn- read-one-row!
+  "Read at most one row as a map keyed by (kf column-name), then close the
+   cursor — execute-one! must not realize an unbounded result set. nil for
+   an empty result set; (.Err rows) is checked only on that path, since a
+   found row stops iteration deliberately."
+  [rows kf]
+  (try
+    (let [cols (mapv kf (.Columns rows))]
+      (if (.Next rows)
+        (zipmap cols (shim/ScanRow rows))
+        (do
+          (when-let [err (.Err rows)]
+            (throw (ex-info (str "sql: reading rows failed: " err)
+                            {:sql/error err})))
+          nil)))
+    (finally (.Close rows))))
+
 (defn- execute*
-  "Shared body of execute! and execute-one!: {:rows [...]} on the rows path,
-   {:update-count n} on the update-count path."
-  [connectable statement opts]
+  "Shared body of execute! and execute-one!: {:result (reader rows kf)} on
+   the rows path, {:update-count n} on the update-count path."
+  [connectable statement opts reader]
   (let [conn (normalize connectable)
         opts (merge (:sql/opts conn) opts)
         [q params] (split-statement statement)
         handle (:sql/handle conn)]
     (if (rows-path? q opts)
-      {:rows (read-rows! (shim/Query handle q params) (key-fn (:keys opts)))}
+      {:result (reader (shim/Query handle q params) (key-fn (:keys opts)))}
       {:update-count (.RowsAffected (shim/Exec handle q params))})))
 
 (defn execute!
@@ -146,19 +179,20 @@
    [{:sql/update-count n}]. Per-call opts merge over the connectable's."
   ([connectable statement] (execute! connectable statement nil))
   ([connectable statement opts]
-   (let [r (execute* connectable statement opts)]
-     (if (contains? r :rows)
-       (:rows r)
+   (let [r (execute* connectable statement opts read-rows!)]
+     (if (contains? r :result)
+       (:result r)
        [{:sql/update-count (:update-count r)}]))))
 
 (defn execute-one!
   "Like execute!, but returns the first row map (nil for an empty result
-   set), or {:sql/update-count n} on the update-count path."
+   set), or {:sql/update-count n} on the update-count path. Reads at most
+   one row from the cursor."
   ([connectable statement] (execute-one! connectable statement nil))
   ([connectable statement opts]
-   (let [r (execute* connectable statement opts)]
-     (if (contains? r :rows)
-       (first (:rows r))
+   (let [r (execute* connectable statement opts read-one-row!)]
+     (if (contains? r :result)
+       (:result r)
        {:sql/update-count (:update-count r)}))))
 
 (defn query

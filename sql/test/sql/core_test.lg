@@ -42,6 +42,16 @@
   (is (not (sql/returns-rows? "insert into t (x) values ('returning')")))
   (is (not (sql/returns-rows? "insert into t (x) values ('a '' returning b')"))))
 
+(deftest returning-inside-comment
+  (is (not (sql/returns-rows? "insert into t (x) values (1) -- returning id")))
+  (is (not (sql/returns-rows? "insert /* returning */ into t (x) values (1)")))
+  (is (not (sql/returns-rows? "update t set x = 1 /* returning\n more */"))))
+
+(deftest quote-hides-comment-marker
+  ;; a -- inside a string literal does not start a comment, so the real
+  ;; RETURNING clause after it still counts
+  (is (sql/returns-rows? "insert into t (x) values ('a -- b') returning id")))
+
 (deftest returning-as-substring-of-identifier
   (is (not (sql/returns-rows? "update t set returningish = 1"))))
 
