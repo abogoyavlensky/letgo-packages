@@ -1,0 +1,11 @@
+{:paths ["src"]
+
+ :deps {;; The driver-agnostic layer: database/sql bindings, the shim, and
+        ;; the sql.core veneer all arrive transitively from here.
+        abogoyavlensky/letgo-sql {:local/root "../sql"}
+
+        ;; Pure Go, so no cgo, no C compiler, and clean cross-builds.
+        ;; Link-only: the stdlib adapter registers itself with database/sql
+        ;; as "pgx". Note the coord is a *package* path; its owning module
+        ;; is github.com/jackc/pgx/v5, which `go get` resolves itself.
+        github.com/jackc/pgx/v5/stdlib {:go/version "v5.10.0"}}}

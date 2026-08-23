@@ -1,0 +1,48 @@
+;; postgres.core — the Postgres driver package: open/close! plus re-exports
+;; of the driver-agnostic sql.core API, so a consumer needs one require.
+;;
+;; The driver is github.com/jackc/pgx/v5 (pure Go) through its stdlib
+;; adapter, which registers itself with database/sql as "pgx" when the
+;; runtime links it.
+(ns postgres.core
+  (:require [sql]
+            [sql.core]))
+
+(def ^:private driver "pgx")
+
+(defn open
+  "Open a connection pool for `dsn` — a connection URL
+   (\"postgres://user:pass@localhost:5432/mydb\") or key=value DSN.
+   Returns a connectable for the fns below. opts become the connection's
+   defaults, merged under per-call opts.
+
+   :keys defaults to :unqualified-lower here (not :unqualified): Postgres
+   folds unquoted identifiers to lower case, so lower-casing makes
+   `select ID, Name` and `select id, name` yield the same keywords."
+  ([dsn] (open dsn nil))
+  ([dsn opts]
+   {:sql/handle (sql/Open driver dsn)
+    :sql/opts (merge {:keys :unqualified-lower} opts)}))
+
+(defn close!
+  "Close a connectable (or bare handle). Returns the close error as a
+   value, nil on success."
+  [conn]
+  (.Close (if (map? conn) (:sql/handle conn) conn)))
+
+(def execute!
+  "See sql.core/execute!."
+  sql.core/execute!)
+
+(def execute-one!
+  "See sql.core/execute-one!."
+  sql.core/execute-one!)
+
+(def query
+  "See sql.core/query."
+  sql.core/query)
+
+(defmacro with-transaction
+  "See sql.core/with-transaction."
+  [bindings & body]
+  `(sql.core/with-transaction ~bindings ~@body))
