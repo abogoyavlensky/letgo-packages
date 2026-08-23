@@ -55,6 +55,10 @@
 (deftest returning-as-substring-of-identifier
   (is (not (sql/returns-rows? "update t set returningish = 1"))))
 
+(deftest non-ascii-statement
+  (is (sql/returns-rows? "select 'é' as name"))
+  (is (not (sql/returns-rows? "insert into t (x) values ('日本語 -- returning')"))))
+
 (deftest known-with-insert-false-positive
   ;; Documented: a WITH whose final clause is DML still takes the rows path.
   (is (sql/returns-rows? "with x as (select 1) insert into t select * from x")))
