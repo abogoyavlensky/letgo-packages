@@ -27,8 +27,8 @@
   (let [conn (db/open (dsn))]
     (try
       ;; execute! for DDL
-      (db/execute! conn ["drop table if exists people"])
-      (db/execute! conn ["create table people (id serial primary key,
+      (db/execute! conn ["drop table if exists letgo_example_people"])
+      (db/execute! conn ["create table letgo_example_people (id serial primary key,
                                                name text not null,
                                                age integer,
                                                height real,
@@ -38,18 +38,18 @@
                                                balance numeric)"])
 
       ;; execute! for parameterized inserts ($1-style placeholders)
-      (let [r (db/execute! conn ["insert into people (name, age, height, active, notes, born, balance)
+      (let [r (db/execute! conn ["insert into letgo_example_people (name, age, height, active, notes, born, balance)
                                   values ($1, $2, $3, $4, $5, to_timestamp($6), $7)"
                                  "Ada" 36 1.63 true nil 1700000000 "12.34"])]
         (check "insert returns [{:sql/update-count 1}]"
                (= [{:sql/update-count 1}] r)))
-      (db/execute! conn ["insert into people (name, age, height, active, notes)
+      (db/execute! conn ["insert into letgo_example_people (name, age, height, active, notes)
                           values ($1, $2, $3, $4, $5)"
                          "Grace" 45 1.5 false "COBOL"])
 
       ;; query -> vector of row maps
       (let [rows (db/query conn ["select id, name, age, height, active, notes
-                                  from people order by id"])]
+                                  from letgo_example_people order by id"])]
         (check "query returns two rows" (= 2 (count rows)))
         (let [ada (first rows)]
           (check "text is a native string" (= "Ada" (:name ada)))
@@ -62,64 +62,67 @@
       ;; timestamptz: the driver returns time.Time; compare through epoch
       (let [row (db/execute-one! conn ["select born,
                                                extract(epoch from born)::bigint as epoch
-                                        from people where name = $1" "Ada"])]
+                                        from letgo_example_people where name = $1" "Ada"])]
         (check "timestamptz epoch round-trips" (= 1700000000 (:epoch row)))
         (check "timestamptz value round-trips (.Unix)"
                (= 1700000000 (.Unix (:born row)))))
 
       ;; numeric: assert the exact decimal text survives
       (let [row (db/execute-one! conn ["select balance, balance::text as bal_text
-                                        from people where name = $1" "Ada"])]
+                                        from letgo_example_people where name = $1" "Ada"])]
         (check "numeric text round-trips" (= "12.34" (:bal_text row)))
-        (check "numeric column is readable" (= "12.34" (str (:balance row)))))
+        ;; the uncast column must arrive as a string, not a float — that is
+        ;; what preserves exact decimal text
+        (check "numeric arrives as a string" (string? (:balance row)))
+        (check "numeric preserves the decimal text" (= "12.34" (:balance row))))
 
       ;; execute-one! -> first row or nil
-      (let [grace (db/execute-one! conn ["select name, active, notes from people
+      (let [grace (db/execute-one! conn ["select name, active, notes from letgo_example_people
                                           where age > $1" 40])]
         (check "execute-one! returns the row map" (= "Grace" (:name grace)))
         (check "false round-trips" (= false (:active grace)))
         (check "text round-trips" (= "COBOL" (:notes grace))))
       (check "execute-one! is nil on empty result"
-             (nil? (db/execute-one! conn ["select * from people where age > $1" 99])))
+             (nil? (db/execute-one! conn ["select * from letgo_example_people where age > $1" 99])))
 
       ;; execute-one! on DML -> {:sql/update-count n}
-      (let [r (db/execute-one! conn ["update people set notes = $1 where name = $2"
+      (let [r (db/execute-one! conn ["update letgo_example_people set notes = $1 where name = $2"
                                      "analytical engine" "Ada"])]
         (check "execute-one! DML returns {:sql/update-count 1}"
                (= {:sql/update-count 1} r)))
 
       ;; INSERT ... RETURNING takes the rows path via the heuristic
-      (let [r (db/execute-one! conn ["insert into people (name, age) values ($1, $2)
+      (let [r (db/execute-one! conn ["insert into letgo_example_people (name, age) values ($1, $2)
                                       returning id, name" "Alan" 41])]
         (check "insert returning yields the row" (= "Alan" (:name r)))
         (check "returned id is an integer" (= 3 (:id r))))
 
       ;; with-transaction committing
       (db/with-transaction [tx conn]
-        (db/execute! tx ["insert into people (name, age) values ($1, $2)" "Edsger" 72])
-        (db/execute! tx ["update people set age = $1 where name = $2" 37 "Ada"]))
+        (db/execute! tx ["insert into letgo_example_people (name, age) values ($1, $2)" "Edsger" 72])
+        (db/execute! tx ["update letgo_example_people set age = $1 where name = $2" 37 "Ada"]))
       (check "transaction committed"
-             (= 4 (:n (db/execute-one! conn ["select count(*) as n from people"]))))
+             (= 4 (:n (db/execute-one! conn ["select count(*) as n from letgo_example_people"]))))
       (check "update inside transaction landed"
-             (= 37 (:age (db/execute-one! conn ["select age from people where name = $1"
+             (= 37 (:age (db/execute-one! conn ["select age from letgo_example_people where name = $1"
                                                 "Ada"]))))
 
       ;; with-transaction rolling back on a throw
       (let [thrown (try
                      (db/with-transaction [tx conn]
-                       (db/execute! tx ["insert into people (name, age) values ($1, $2)"
+                       (db/execute! tx ["insert into letgo_example_people (name, age) values ($1, $2)"
                                         "Nobody" 1])
                        (throw (ex-info "boom" {}))
                        :not-reached)
                      (catch Throwable e (ex-message e)))]
         (check "the body's exception is rethrown" (= "boom" thrown)))
       (check "rollback undid the insert"
-             (nil? (db/execute-one! conn ["select * from people where name = $1"
+             (nil? (db/execute-one! conn ["select * from letgo_example_people where name = $1"
                                           "Nobody"])))
 
       ;; :keys default is :unqualified-lower here (Postgres folds unquoted
       ;; identifiers anyway; quoted ones prove the lower-casing)
-      (let [row (db/execute-one! conn ["select name as \"MixedCase\" from people
+      (let [row (db/execute-one! conn ["select name as \"MixedCase\" from letgo_example_people
                                         where name = $1" "Ada"])]
         (check "default :unqualified-lower lower-cases quoted columns"
                (= "Ada" (:mixedcase row))))
