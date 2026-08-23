@@ -1,0 +1,28 @@
+;; End-to-end exercise of the sqlite wrapper: create, insert, read back.
+(ns main
+  (:require [sqlite.core :as db]))
+
+(def ^:private path "/tmp/lgx-sqlite-example.db")
+
+(defn -main []
+  (let [conn (db/open path)]
+    (try
+      (db/execute! conn ["drop table if exists people"])
+      (db/execute! conn ["create table people (id integer primary key,
+                                               name text not null,
+                                               age integer)"])
+      (println "inserted:"
+               (db/execute! conn ["insert into people (name, age) values (?, ?)"
+                                  "Ada" 36]))
+      (println "inserted:"
+               (db/execute! conn ["insert into people (name, age) values (?, ?)"
+                                  "Grace" 45]))
+      (println "all rows:")
+      (doseq [row (db/query conn ["select id, name, age from people
+                                  order by id"])]
+        (println " " row))
+      (println "filtered:"
+               (db/query conn ["select name from people where age > ?" 40]))
+      (finally (db/close! conn)))))
+
+(-main)

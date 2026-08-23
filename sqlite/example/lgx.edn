@@ -1,0 +1,6 @@
+{:paths []
+ :main "main.lg"
+ :lg-version "1.11.1"
+ :targets {:bin {:out "bin/app"}}
+
+ :deps {abogoyavlensky/letgo-sqlite {:local/root ".."}}}

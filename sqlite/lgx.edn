@@ -1,0 +1,12 @@
+{:paths ["src"]
+
+ :deps {;; Bindings for the stdlib API the veneer sits on.
+        database/sql {:go/interop "sql"}
+
+        ;; Pure Go, so no cgo, no C compiler, and clean cross-builds.
+        ;; Link-only: it registers itself with database/sql from init.
+        modernc.org/sqlite {:go/version "v1.57.0"}
+
+        ;; The hand-written seam. :go/local while the wrapper is unreleased;
+        ;; becomes {:go/version "vX.Y.Z"} when it is tagged.
+        github.com/abogoyavlensky/letgo-packages/sqlite/shim {:go/local "shim"}}}

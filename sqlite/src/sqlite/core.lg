@@ -1,0 +1,63 @@
+;; sqlite.core — a small, idiomatic veneer over Go's database/sql, driven by
+;; the pure-Go modernc.org/sqlite driver.
+;;
+;; The layers underneath, from the bottom up:
+;;
+;;   modernc.org/sqlite  registers itself as the "sqlite" driver (link-only)
+;;   database/sql        generated bindings — sql/Open, and reflective method
+;;                       dispatch on *sql.DB / *sql.Rows / sql.Result
+;;   sqlite.shim         the three things generation cannot do: Scan's
+;;                       out-parameters, and spreading a parameter vector into
+;;                       a variadic Go method
+;;   sqlite.core         this file — the API you would actually want to use
+;;
+;; Statements are taken as a [sql-string & params] vector, which is what
+;; HoneySQL's `format` returns.
+(ns sqlite.core
+  (:require [sql]
+            [sqlite.shim :as shim]))
+
+(def ^:private driver "sqlite")
+
+(defn open
+  "Open the sqlite database at `path`. Use \":memory:\" for an in-memory one.
+   Returns a database handle to pass to the fns below."
+  [path]
+  (sql/Open driver path))
+
+(defn close!
+  "Close a database handle. Returns the error as a value, nil on success."
+  [db]
+  (.Close db))
+
+(defn- split-statement
+  "A [sql-string & params] vector as [q params-vector]."
+  [statement]
+  [(first statement) (vec (rest statement))])
+
+(defn- row-seq [rows cols]
+  (lazy-seq
+    (when (.Next rows)
+      (cons (zipmap cols (shim/ScanRow rows))
+            (row-seq rows cols)))))
+
+(defn query
+  "Run a [sql-string & params] statement and return its rows as a vector of
+   column-keyword -> value maps."
+  [db statement]
+  (let [[q params] (split-statement statement)
+        rows (shim/Query db q params)]
+    (try
+      (let [cols (mapv keyword (.Columns rows))]
+        ;; Realized before the finally closes the cursor: the seq reads
+        ;; through `rows`, so a lazy one would be reading a closed handle.
+        (vec (doall (row-seq rows cols))))
+      (finally (.Close rows)))))
+
+(defn execute!
+  "Run a [sql-string & params] statement for effect. Returns
+   {:rows-affected n}."
+  [db statement]
+  (let [[q params] (split-statement statement)
+        r (shim/Exec db q params)]
+    {:rows-affected (.RowsAffected r)}))
