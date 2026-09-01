@@ -1,0 +1,55 @@
+;; wails.core — the let-go veneer over the Wails v3 shim.
+;;
+;; An app is built, given a window, and run; handlers are plain let-go
+;; fns registered by name. Everything the frontend calls goes through one
+;; bound Go method (see wails.shim), so there is no bindings-generation
+;; step and no Go to write per handler.
+(ns wails.core
+  (:require [wails.shim :as shim]))
+
+(def bridge-method
+  "The fully-qualified name the frontend passes to Call.ByName."
+  shim/BridgeMethod)
+
+(defn new-app
+  "Build the application. opts keys (all optional):
+
+     \"name\"         application name, used in the default about box
+     \"description\"  application description
+     \"assets-dir\"   directory served as the frontend
+
+   Returns the app, which every other fn here takes."
+  [opts]
+  (shim/New opts))
+
+(defn new-window
+  "Open a window. opts keys (all optional): \"title\", \"width\",
+   \"height\", \"url\"."
+  [app opts]
+  (shim/NewWindow app opts))
+
+(defn handler!
+  "Register `f` as the handler the frontend reaches by `name`. The
+   frontend's arguments arrive as let-go values; the return value is
+   lowered to JSON — a map becomes an object, a vector an array, a
+   keyword its name without the colon. Throwing surfaces as a rejected
+   promise on the frontend."
+  [name f]
+  (shim/Register name f))
+
+(defn emit!
+  "Send `data` to the frontend as the event `name`."
+  [app name data]
+  (shim/Emit app name data))
+
+(defn run!
+  "Block on the Wails event loop. Must be called from the main goroutine,
+   so call it from the top of your entry fn, not from a spawned thread.
+   Returns the error as a value, nil on a clean exit."
+  [app]
+  (shim/Run app))
+
+(defn quit!
+  "Stop the application."
+  [app]
+  (shim/Quit app))

@@ -18,6 +18,7 @@ Depend on one with `:deps/root`:
 | [`sql/`](sql/) | The driver-agnostic SQL layer: `database/sql` bindings, a Go shim, and a next.jdbc-shaped API (`execute!`, `execute-one!`, `query`, `with-transaction`) |
 | [`sqlite/`](sqlite/) | SQLite driver over `sql/`, via the pure-Go `modernc.org/sqlite` |
 | [`postgres/`](postgres/) | PostgreSQL driver over `sql/`, via the pure-Go `github.com/jackc/pgx/v5` |
+| [`wails/`](wails/) | Desktop apps over [Wails v3](https://v3.wails.io): a webview frontend with let-go handlers behind it |
 
 The driver packages are thin: `open`/`close!` plus re-exports of the
 `sql` API. An app depends on one driver package; lgx's transitive
@@ -30,6 +31,12 @@ custom-runtime build.
 **Pure Go only.** A driver that needs cgo would force a C toolchain on
 every user and break cross-compiled builds. Both current drivers are
 pure Go; any future one must be too.
+
+This rule is about *drivers*. `wails/` is cgo by necessity — the platform
+webview is a C library on Linux and macOS — and it pays exactly the price
+the rule exists to avoid: a C toolchain per developer, and no
+cross-compilation. That is inherent to desktop UI, not a choice, and it is
+why the package documents it up front.
 
 ## Tagging status
 
