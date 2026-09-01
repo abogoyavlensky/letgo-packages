@@ -4,14 +4,12 @@ Desktop apps for let-go: a thin wrapper over
 [Wails v3](https://v3.wails.io), which pairs a Go backend with a webview
 frontend. Your UI is HTML/CSS/JS; your application logic is let-go.
 
-**Status: works, GUI unverified.** The full stack — Wails linked into an
-lgx-built runtime, an app and window created from let-go, frontend calls
-dispatched to let-go handlers, a single-binary build — is verified end to
-end. It was verified in Wails' cgo-free `-tags server` mode (an HTTP
-server plus a browser, no native webview), because the machine had no
-GTK. Everything above the platform layer is the same code either way, but
-the native window itself has not been run. See
-[`Requirements`](#requirements) before assuming it works on your machine.
+**Status: works.** Verified end to end on macOS with Wails
+v3.0.0-beta.16 — a native WKWebView window created from let-go, handlers
+answering frontend calls, a let-go map arriving as a JSON object, and a
+single-binary build. The Linux GTK4/WebKitGTK window is the one path not
+yet run: that machine had no GTK, so it exercised everything above the
+platform layer in Wails' cgo-free `-tags server` mode instead.
 
 ## Requirements
 
@@ -136,8 +134,11 @@ cd example
 lgx run
 ```
 
-The first run builds the custom runtime (a minute or so, once). On a
-machine without the platform webview headers you can still exercise
+The first run builds the custom runtime, which on macOS takes a few
+minutes the first time — the Objective-C compile of the Cocoa layer is the
+slow part. After that it is cached.
+
+On a machine without the platform webview headers you can still exercise
 everything but the window, in Wails' server mode:
 
 ```
