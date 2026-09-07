@@ -40,15 +40,19 @@ why the package documents it up front.
 
 ## Tagging status
 
-Nothing is tagged yet, and two blockers stand:
+Nothing is tagged yet. Both original blockers are cleared: lgx now reads a
+package's `lgx.edn` from `:deps/root`, and let-go's `[]any` boxing fix is
+merged. What remains is a let-go **release** to pin `sql/shim/go.mod` against —
+it currently requires a placeholder `v0.0.0`, and the newest release predates
+the merged interop work.
 
-1. lgx reads a dependency's `lgx.edn` from the checkout root rather than
-   from `:deps/root`, so external consumers would silently miss a
-   package's Go coords. Fixed by the lgx cross-compilation work; do not
-   tag before that fix ships.
-2. `sql/shim/go.mod` requires let-go at a placeholder `v0.0.0` and needs
-   a real release to pin - one that carries the `[]any` boxing fix (in
-   let-go's `integration/go-interop`, unreleased as of this writing).
+Until then, consumers pin `:lg-version` to a commit on let-go's `main`, which
+builds the whole stack from the module proxy with no let-go checkout:
 
-Development is unaffected: each `example/` uses `:local/root ".."`, and
-runtime builds use `LGX_LETGO_REPLACE` pointed at a let-go checkout.
+```clojure
+{:lg-version "f26eb497299760e93ce430302f13ab3a954eab64"}
+```
+
+Each `example/` uses `:local/root ".."` so it tests the working tree.
+`LGX_LETGO_REPLACE` is now only for developing against uncommitted let-go
+changes — a sha pin covers everything else.
