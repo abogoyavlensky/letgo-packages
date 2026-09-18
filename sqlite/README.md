@@ -12,8 +12,8 @@ cross-compiled builds stay clean.
 - The Go toolchain on `PATH` (`mise use -g go@latest`, or
   <https://go.dev/dl>). lgx builds a custom `lg` that links the driver;
   that build happens once and is cached under `~/.lgx/runtimes/`.
-- A `:lg-version` pin in your `lgx.edn` - it is the let-go the custom
-  runtime is built from.
+- `:lg-runtime :built` and a `:lg-version` pin in your `lgx.edn` - the
+  pin is the let-go the custom runtime is built from.
 
 ## Use
 
@@ -21,6 +21,7 @@ cross-compiled builds stay clean.
 ;; lgx.edn
 {:paths ["src"]
  :main "main.lg"
+ :lg-runtime :built
  :lg-version "1.11.1"
  :deps {abogoyavlensky/letgo-sqlite {:git/url "https://github.com/abogoyavlensky/letgo-packages"
                                      :git/tag "sqlite-v0.1.0"
