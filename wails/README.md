@@ -35,6 +35,7 @@ platform layer in Wails' cgo-free `-tags server` mode instead.
 ;; lgx.edn
 {:paths ["src"]
  :main "main.lg"
+ :lg-runtime :built
  :lg-version "1.11.1"
  :deps {abogoyavlensky/letgo-wails {:git/url "https://github.com/abogoyavlensky/letgo-packages"
                                     :git/tag "wails-v0.1.0"

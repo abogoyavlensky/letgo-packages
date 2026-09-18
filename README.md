@@ -46,11 +46,13 @@ merged. What remains is a let-go **release** to pin `sql/shim/go.mod` against â€
 it currently requires a placeholder `v0.0.0`, and the newest release predates
 the merged interop work.
 
-Until then, consumers pin `:lg-version` to a commit on let-go's `main`, which
-builds the whole stack from the module proxy with no let-go checkout:
+Until then, consumers set `:lg-runtime :built` and pin `:lg-version` to a
+commit on let-go's `main`, which builds the whole stack from the module proxy
+with no let-go checkout:
 
 ```clojure
-{:lg-version "f26eb497299760e93ce430302f13ab3a954eab64"}
+{:lg-runtime :built
+ :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"}
 ```
 
 Each `example/` uses `:local/root ".."` so it tests the working tree.
