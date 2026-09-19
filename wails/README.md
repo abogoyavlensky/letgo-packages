@@ -13,9 +13,9 @@ platform layer in Wails' cgo-free `-tags server` mode instead.
 
 ## Requirements
 
-- [lgx](https://github.com/abogoyavlensky/lgx) with `:go/*` support, and
-  a let-go carrying the out-of-tree interop work. Both are unreleased —
-  see [Development](#development).
+- [lgx](https://github.com/abogoyavlensky/lgx) 0.2 or newer, and a
+  let-go carrying the merged interop work — no tagged let-go release does
+  yet, so pin `:lg-version` to a sha (see [Use](#use)).
 - The Go toolchain on `PATH`. lgx builds a custom `lg` that links Wails.
 - **A C toolchain and the platform webview headers**, because Wails is
   cgo on the two Unix desktops:
@@ -36,7 +36,7 @@ platform layer in Wails' cgo-free `-tags server` mode instead.
 {:paths ["src"]
  :main "main.lg"
  :lg-runtime :built
- :lg-version "1.11.1"
+ :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"
  :deps {abogoyavlensky/letgo-wails {:git/url "https://github.com/abogoyavlensky/letgo-packages"
                                     :git/tag "wails-v0.1.0"
                                     :deps/root "wails"}}}
@@ -120,7 +120,7 @@ TypeScript types for a three-line JS helper.
 
 ```
 wails/
-├── lgx.edn        deps: the shim (:go/local). No :go/interop at all.
+├── lgx.edn        deps: the shim (:go/version). No :go/interop at all.
 ├── shim/          the only Go: options assembly, service registration,
 │   └── shim.go      the let-go dispatcher, and value lowering
 ├── src/wails/
@@ -172,15 +172,15 @@ internal packages gate on `linux && cgo` without a `!server` guard.
 
 ## Development
 
-While the packages are unreleased, `lgx.edn` points at the shim with
-`{:go/local "shim"}` and `shim/go.mod` requires let-go at a placeholder
-`v0.0.0`, which the runtime module's `replace` governs. To build against a
-let-go working tree:
+The shim ships as the tagged Go module `wails/shim/vX.Y.Z`, which
+`lgx.edn` pins with `:go/version`. To edit it, flip that coord to
+`{:go/local "shim"}` locally — see "Releasing" in the root README. To
+build against a let-go working tree:
 
 ```
 LGX_LETGO_REPLACE=/path/to/let-go lgx run
 ```
 
 The dev loop is fast once the first build is done: about 0.3s when only
-`.lg` files changed, about 1.4s after a Go edit to the shim (a full
-recompile and relink of the runtime).
+`.lg` files changed, about 1.4s after a Go edit to the shim with the
+coord flipped to `:go/local` (a full recompile and relink of the runtime).

@@ -94,7 +94,7 @@ so a nested transaction would silently be a second independent one.
 
 ```
 sql/
-├── lgx.edn        :go/interop for database/sql + the shim (:go/local)
+├── lgx.edn        :go/interop for database/sql + the shim (:go/version)
 ├── src/sql/
 │   └── core.lg    the API above
 ├── test/          direct tests for the returns-rows? heuristic
@@ -119,6 +119,6 @@ generation:
 Values cross the boundary as plain `[]any` in both directions; let-go's
 boxing layer converts elements by their dynamic type, so scanned columns
 arrive as native strings, ints, floats, and `nil` for NULL. This needs
-the `[]any` boxing fix from let-go's `integration/go-interop` branch
-(unreleased as of this writing) - see the tagging notes in the
-[repo README](../README.md).
+let-go's merged `[]any` boxing fix, which no tagged let-go release carries
+yet - pin `:lg-version` to the sha in "Releasing" in the
+[repo README](../README.md) or newer.

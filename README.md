@@ -38,23 +38,57 @@ the rule exists to avoid: a C toolchain per developer, and no
 cross-compilation. That is inherent to desktop UI, not a choice, and it is
 why the package documents it up front.
 
-## Tagging status
+## Releasing
 
-Nothing is tagged yet. Both original blockers are cleared: lgx now reads a
-package's `lgx.edn` from `:deps/root`, and let-go's `[]any` boxing fix is
-merged. What remains is a let-go **release** to pin `sql/shim/go.mod` against —
-it currently requires a placeholder `v0.0.0`, and the newest release predates
-the merged interop work.
+Two kinds of tags live in this repo:
 
-Until then, consumers set `:lg-runtime :built` and pin `:lg-version` to a
-commit on let-go's `main`, which builds the whole stack from the module proxy
-with no let-go checkout:
+| Tag | Form | Read by |
+|---|---|---|
+| Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
+| Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
+
+Only `sql` and `wails` have a shim. `sqlite` and `postgres` have none —
+they inherit `sql`'s through their `:local/root "../sql"` dep, so a shim
+change in `sql` is a package bump for them too.
+
+When a shim changed, in this order:
+
+1. Tag `<pkg>/shim/vX.Y.Z` on the commit that contains the shim change
+   and push the tag.
+2. From a throwaway module, require let-go first, then
+   `go get github.com/abogoyavlensky/letgo-packages/<pkg>/shim@vX.Y.Z`.
+   It must report plain `vX.Y.Z`, not a pseudo-version.
+3. Set `<pkg>/lgx.edn` to `{:go/version "vX.Y.Z"}` and commit.
+4. Tag every affected package `<pkg>-vX.Y.Z` on that commit and push.
+
+The order matters: the coord in step 3 names a tag that `go get` fetches
+from GitHub, so the Go tag has to exist before the commit that references
+it, and the package tag has to follow that commit so consumers receive the
+flipped `lgx.edn`. When only `.lg` files changed, do step 4 alone.
+
+**The `v0.0.0` let-go require** in `sql/shim/go.mod` and
+`wails/shim/go.mod` is deliberate. A shim has no let-go version of its
+own: Go's minimal version selection resolves the placeholder to whatever
+the consumer's `:lg-version` pins, so the project's pin stays
+authoritative. A real version here would set a floor and silently bump an
+older pin. The cost is that `shim/` does not build on its own — `go vet`
+inside it needs a `replace` or a `go.work` — it compiles through the
+runtime module lgx generates. Known to work from let-go
+`f26eb497299760e93ce430302f13ab3a954eab64`, the first commit carrying the
+merged interop work; consumers pin that or newer with `:lg-runtime :built`:
 
 ```clojure
 {:lg-runtime :built
  :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"}
 ```
 
-Each `example/` uses `:local/root ".."` so it tests the working tree.
-`LGX_LETGO_REPLACE` is now only for developing against uncommitted let-go
-changes — a sha pin covers everything else.
+**Never move or delete a pushed tag.** proxy.golang.org and sum.golang.org
+record a Go module tag permanently, and lgx caches a `:git/tag` checkout
+under the tag name. Fix forward with a new version.
+
+**Working on a shim.** Flip `<pkg>/lgx.edn` back to `{:go/local "shim"}`
+locally. lgx then rebuilds the runtime on every command — incremental,
+about a second — so edits to `shim.go` take effect, and each `example/`
+picks them up through its `:local/root ".."` dep. Do not commit the
+flip-back; release per the steps above instead. `LGX_LETGO_REPLACE` is
+the separate lever for developing against an uncommitted let-go change.

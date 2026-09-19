@@ -22,7 +22,7 @@ cross-compiled builds stay clean.
 {:paths ["src"]
  :main "main.lg"
  :lg-runtime :built
- :lg-version "1.11.1"
+ :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"
  :deps {abogoyavlensky/letgo-sqlite {:git/url "https://github.com/abogoyavlensky/letgo-packages"
                                      :git/tag "sqlite-v0.1.0"
                                      :deps/root "sqlite"}}}
@@ -126,14 +126,9 @@ The first run builds the custom runtime (a minute or so, once).
 
 ## Development
 
-While the packages are unreleased, `sql/lgx.edn` points at the shim with
-`{:go/local "shim"}` and `sql/shim/go.mod` requires let-go at a
-placeholder `v0.0.0`, which the runtime module's `replace` governs.
-Before tagging, both have to become real: the shim's require pinned to a
-released let-go, and the coord switched to `{:go/version "vX.Y.Z"}`.
-The pinned release must also carry let-go's `[]any` boxing fix (in
-`integration/go-interop`, unreleased as of this writing) - without it,
-scanned values arrive as opaque boxes.
+The shim ships as the tagged Go module `sql/shim/vX.Y.Z`, which
+`sql/lgx.edn` pins with `:go/version`. To edit it, flip that coord to
+`{:go/local "shim"}` locally — see "Releasing" in the root README.
 
 To build against a let-go working tree rather than a release:
 

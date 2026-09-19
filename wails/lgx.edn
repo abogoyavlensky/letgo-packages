@@ -1,7 +1,8 @@
 {:paths ["src"]
 
- ;; The hand-written seam, and the only Go in the stack. :go/local while
- ;; the wrapper is unreleased; becomes {:go/version "vX.Y.Z"} when it is
- ;; tagged. Wails itself arrives through the shim's own go.mod — this
- ;; package generates no bindings, so it declares no :go/interop.
- :deps {github.com/abogoyavlensky/letgo-packages/wails/shim {:go/local "shim"}}}
+ ;; The hand-written seam, and the only Go in the stack, released as the
+ ;; nested Go module tagged wails/shim/vX.Y.Z. To work on it, flip this to
+ ;; {:go/local "shim"} locally and do not commit that (see "Releasing" in
+ ;; the root README). Wails itself arrives through the shim's own go.mod —
+ ;; this package generates no bindings, so it declares no :go/interop.
+ :deps {github.com/abogoyavlensky/letgo-packages/wails/shim {:go/version "v0.1.0"}}}

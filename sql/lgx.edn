@@ -5,6 +5,7 @@
         ;; postgres) depend on this package and add their own.
         database/sql {:go/interop "sql"}
 
-        ;; The hand-written seam. :go/local while the wrapper is unreleased;
-        ;; becomes {:go/version "vX.Y.Z"} when it is tagged.
-        github.com/abogoyavlensky/letgo-packages/sql/shim {:go/local "shim"}}}
+        ;; The hand-written seam, released as the nested Go module tagged
+        ;; sql/shim/vX.Y.Z. To work on it, flip this to {:go/local "shim"}
+        ;; locally and do not commit that (see "Releasing" in the root README).
+        github.com/abogoyavlensky/letgo-packages/sql/shim {:go/version "v0.1.0"}}}
