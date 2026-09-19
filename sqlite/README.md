@@ -8,7 +8,9 @@ cross-compiled builds stay clean.
 
 ## Requirements
 
-- [lgx](https://github.com/abogoyavlensky/lgx) 0.2 or newer.
+- [lgx](https://github.com/abogoyavlensky/lgx) with `:lg-runtime`
+  support — on lgx `master` after 0.2.1, not in a tagged release yet, so
+  build `bin/lgx` from source.
 - The Go toolchain on `PATH` (`mise use -g go@latest`, or
   <https://go.dev/dl>). lgx builds a custom `lg` that links the driver;
   that build happens once and is cached under `~/.lgx/runtimes/`.
