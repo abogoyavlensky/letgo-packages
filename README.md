@@ -73,13 +73,13 @@ the consumer's `:lg-version` pins, so the project's pin stays
 authoritative. A real version here would set a floor and silently bump an
 older pin. The cost is that `shim/` does not build on its own — `go vet`
 inside it needs a `replace` or a `go.work` — it compiles through the
-runtime module lgx generates. Known to work from let-go
-`f26eb497299760e93ce430302f13ab3a954eab64`, the first commit carrying the
-merged interop work; consumers pin that or newer with `:lg-runtime :built`:
+runtime module lgx generates. Needs let-go 1.13.0 or newer, the first
+release carrying the interop work; consumers pin it with
+`:lg-runtime :built`:
 
 ```clojure
 {:lg-runtime :built
- :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"}
+ :lg-version "1.13.0"}
 ```
 
 **Never move or delete a pushed tag.** proxy.golang.org and sum.golang.org

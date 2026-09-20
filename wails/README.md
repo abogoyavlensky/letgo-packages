@@ -15,9 +15,8 @@ platform layer in Wails' cgo-free `-tags server` mode instead.
 
 - [lgx](https://github.com/abogoyavlensky/lgx) with `:lg-runtime`
   support — on lgx `master` after 0.2.1, not in a tagged release yet, so
-  build `bin/lgx` from source — and a let-go carrying the merged interop
-  work, which no tagged let-go release does yet either: pin `:lg-version`
-  to a sha (see [Use](#use)).
+  build `bin/lgx` from source — and let-go 1.13.0 or newer, the first
+  release carrying the interop work (see [Use](#use)).
 - The Go toolchain on `PATH`. lgx builds a custom `lg` that links Wails.
 - **A C toolchain and the platform webview headers**, because Wails is
   cgo on the two Unix desktops:
@@ -38,7 +37,7 @@ platform layer in Wails' cgo-free `-tags server` mode instead.
 {:paths ["src"]
  :main "main.lg"
  :lg-runtime :built
- :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"
+ :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-wails {:git/url "https://github.com/abogoyavlensky/letgo-packages"
                                     :git/tag "wails-v0.1.0"
                                     :deps/root "wails"}}}

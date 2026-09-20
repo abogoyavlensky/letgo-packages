@@ -119,6 +119,6 @@ generation:
 Values cross the boundary as plain `[]any` in both directions; let-go's
 boxing layer converts elements by their dynamic type, so scanned columns
 arrive as native strings, ints, floats, and `nil` for NULL. This needs
-let-go's merged `[]any` boxing fix, which no tagged let-go release carries
-yet - pin `:lg-version` to the sha in "Releasing" in the
-[repo README](../README.md) or newer.
+let-go's `[]any` boxing fix, released in let-go 1.13.0 - pin
+`:lg-version "1.13.0"` or newer (see "Releasing" in the
+[repo README](../README.md)).

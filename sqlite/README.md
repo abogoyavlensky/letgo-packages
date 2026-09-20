@@ -24,7 +24,7 @@ cross-compiled builds stay clean.
 {:paths ["src"]
  :main "main.lg"
  :lg-runtime :built
- :lg-version "f26eb497299760e93ce430302f13ab3a954eab64"
+ :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-sqlite {:git/url "https://github.com/abogoyavlensky/letgo-packages"
                                      :git/tag "sqlite-v0.1.0"
                                      :deps/root "sqlite"}}}
