@@ -48,6 +48,16 @@
     (p/remove-migration-id ds "a")
     (is (= ["b" "c"] (p/applied-migration-ids ds)))))
 
+(deftest store-ignores-the-connection-key-fn
+  ;; An app-level :keys default (namespaced keywords here) must not change
+  ;; what the store reads back.
+  (let [conn (sqlite/open ":memory:" {:keys (fn [s] (keyword "db" s))})
+        ds (rt/sql-database conn)]
+    (p/add-migration-id ds "001")
+    (is (= ["001"] (p/applied-migration-ids ds)))
+    (rt/migrate {:datastore ds :migrations [(migration "001")]})
+    (is (= ["001"] (p/applied-migration-ids ds)))))
+
 (deftest ids-with-quotes
   (let [ds (rt/sql-database (fresh-conn))]
     (p/add-migration-id ds "it's")

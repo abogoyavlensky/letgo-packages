@@ -48,14 +48,20 @@
 (defn- select-sql [table]
   (str "select id from " table " order by seq"))
 
+;; The store's own reads and writes pin their sql.core options: a connection
+;; opened with an app-level :keys fn (or a :returns default) must not change
+;; what the history looks like to ragtime.
+(def ^:private read-opts {:keys :unqualified :returns :rows})
+(def ^:private write-opts {:returns :update-count})
+
 (defrecord SqlDatabase [conn migrations-table]
   p/DataStore
   (add-migration-id [_ id]
-    (sql/execute! conn [(insert-sql migrations-table id)]))
+    (sql/execute! conn [(insert-sql migrations-table id)] write-opts))
   (remove-migration-id [_ id]
-    (sql/execute! conn [(delete-sql migrations-table id)]))
+    (sql/execute! conn [(delete-sql migrations-table id)] write-opts))
   (applied-migration-ids [_]
-    (mapv :id (sql/query conn [(select-sql migrations-table)]))))
+    (mapv :id (sql/query conn [(select-sql migrations-table)] read-opts))))
 
 (defn sql-database
   "A ragtime DataStore over `conn`, any sql.core connectable. Creates the
@@ -64,7 +70,7 @@
   ([conn] (sql-database conn nil))
   ([conn opts]
    (let [table (or (:migrations-table opts) default-table)]
-     (sql/execute! conn [(create-table-sql table)])
+     (sql/execute! conn [(create-table-sql table)] write-opts)
      (->SqlDatabase conn table))))
 
 (defn- run-statements! [db stmts]
