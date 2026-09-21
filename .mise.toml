@@ -1,0 +1,14 @@
+[tools]
+lg = "1.13.0"
+lgx = "0.3.1"
+go = "1.26"
+
+[tool_alias]
+lg = "github:nooga/let-go"
+lgx = "github:abogoyavlensky/lgx"
+
+[settings]
+# mise can't verify lg 1.12.2+ GitHub attestations: GitHub rotated its TSA cert
+# (late June 2026) and mise's bundled trusted root predates it. Checksum + SLSA
+# still run. Drop when a newer mise ships the new TSA.
+github_attestations = false

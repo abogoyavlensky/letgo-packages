@@ -1,0 +1,100 @@
+;; ragtime.letgo — schema migrations for let-go with ragtime's core, over the
+;; sql layer of letgo-packages. The let-go counterpart of ragtime.next-jdbc:
+;; a DataStore that remembers applied migration ids in a table, a Migration
+;; that runs SQL statements up and down, and ragtime.repl's migrate/rollback
+;; re-exported so an app needs one require.
+;;
+;; Driver-agnostic by construction: everything here goes through sql.core, so
+;; any connectable (sqlite.core/open, postgres.core/open) works. Two choices
+;; keep the store's own SQL portable:
+;;
+;;   - No parameters. Placeholders differ per driver (? on sqlite, $1 on
+;;     postgres) and a connectable does not name its driver, so the migration
+;;     id is inlined as a quoted literal with ' doubled. Ids are file-name
+;;     shaped strings; the escape covers the one character that matters.
+;;   - No autoincrement, no clock. sqlite's INTEGER PRIMARY KEY auto-fills and
+;;     postgres wants serial; a created_at column wants a timestamp. Ordering
+;;     comes from a seq column the insert fills itself.
+(ns ragtime.letgo
+  (:require [ragtime.protocols :as p]
+            [ragtime.repl :as repl]
+            [sql.core :as sql]
+            [string :as str]))
+
+(def ^:private default-table "ragtime_migrations")
+
+(defn- quote-literal
+  "`s` as a SQL string literal: single-quoted, embedded quotes doubled."
+  [s]
+  (str "'" (str/replace (str s) "'" "''") "'"))
+
+(defn- statement
+  "What sql.core/execute! takes: a bare string becomes [s]; a vector passes
+   through."
+  [stmt]
+  (if (string? stmt) [stmt] stmt))
+
+(defn- create-table-sql [table]
+  (str "create table if not exists " table
+       " (seq integer primary key, id text not null unique)"))
+
+(defn- insert-sql [table id]
+  (str "insert into " table " (seq, id) select coalesce(max(seq), 0) + 1, "
+       (quote-literal id) " from " table))
+
+(defn- delete-sql [table id]
+  (str "delete from " table " where id = " (quote-literal id)))
+
+(defn- select-sql [table]
+  (str "select id from " table " order by seq"))
+
+(defrecord SqlDatabase [conn migrations-table]
+  p/DataStore
+  (add-migration-id [_ id]
+    (sql/execute! conn [(insert-sql migrations-table id)]))
+  (remove-migration-id [_ id]
+    (sql/execute! conn [(delete-sql migrations-table id)]))
+  (applied-migration-ids [_]
+    (mapv :id (sql/query conn [(select-sql migrations-table)]))))
+
+(defn sql-database
+  "A ragtime DataStore over `conn`, any sql.core connectable. Creates the
+   bookkeeping table when it does not exist. opts: {:migrations-table name}
+   (default \"ragtime_migrations\")."
+  ([conn] (sql-database conn nil))
+  ([conn opts]
+   (let [table (or (:migrations-table opts) default-table)]
+     (sql/execute! conn [(create-table-sql table)])
+     (->SqlDatabase conn table))))
+
+(defn- run-statements! [db stmts]
+  (sql/with-transaction [tx (:conn db)]
+    (doseq [stmt stmts]
+      (sql/execute! tx (statement stmt)))))
+
+;; ragtime hands the DataStore to run-up!/run-down!, which is where the
+;; connection comes from. One transaction per direction: a statement that
+;; fails leaves the schema as it was.
+(defrecord SqlMigration [id up down]
+  p/Migration
+  (id [_] id)
+  (run-up! [_ db] (run-statements! db up))
+  (run-down! [_ db] (run-statements! db down)))
+
+(defn sql-migration
+  "A ragtime Migration from {:id string :up [stmt ...] :down [stmt ...]}. Each
+   stmt is what sql.core/execute! takes — a SQL string or [sql & params]."
+  [{:keys [id up down]}]
+  (->SqlMigration id (vec up) (vec down)))
+
+(def migrate
+  "ragtime.repl/migrate: (migrate {:datastore ds :migrations [...] & opts}).
+   Applies every migration not yet applied, under the :strategy (default
+   raise-error) with the :reporter (default prints Applying <id>)."
+  repl/migrate)
+
+(def rollback
+  "ragtime.repl/rollback: (rollback config) rolls back the last migration,
+   (rollback config n) the last n, (rollback config id) down to and including
+   id."
+  repl/rollback)
