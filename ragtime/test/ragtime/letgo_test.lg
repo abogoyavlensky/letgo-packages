@@ -1,0 +1,113 @@
+;; Tests for ragtime.letgo over an in-memory sqlite database (the :test
+;; context brings the driver in). Run with: lgx test  (from ragtime/)
+
+(ns ragtime.letgo-test
+  (:require [clojure.test :refer [deftest is]]
+            [ragtime.letgo :as rt]
+            [ragtime.protocols :as p]
+            [sql.core :as sql]
+            [sqlite.core :as sqlite]
+            [string :as str]))
+
+(defn- fresh-conn [] (sqlite/open ":memory:"))
+
+(defn- tables
+  "Names of the user tables in `conn`, sorted."
+  [conn]
+  (sort (mapv :name (sql/query conn ["select name from sqlite_master where type = 'table' and name not like 'sqlite_%'"]))))
+
+(defn- table-for
+  "A valid unquoted identifier for a migration id: m_ + id with - as _."
+  [id]
+  (str "m_" (str/replace id "-" "_")))
+
+(defn- migration [id]
+  (rt/sql-migration {:id id
+                     :up [(str "create table " (table-for id) " (x integer)")]
+                     :down [(str "drop table " (table-for id))]}))
+
+(deftest store-creates-its-table
+  (let [conn (fresh-conn)]
+    (rt/sql-database conn)
+    (is (= ["ragtime_migrations"] (tables conn)))
+    ;; A second call is a no-op.
+    (rt/sql-database conn)
+    (is (= ["ragtime_migrations"] (tables conn)))))
+
+(deftest custom-table-name
+  (let [conn (fresh-conn)]
+    (rt/sql-database conn {:migrations-table "schema_history"})
+    (is (= ["schema_history"] (tables conn)))))
+
+(deftest applied-ids-in-order
+  (let [ds (rt/sql-database (fresh-conn))]
+    (p/add-migration-id ds "b")
+    (p/add-migration-id ds "a")
+    (p/add-migration-id ds "c")
+    (is (= ["b" "a" "c"] (p/applied-migration-ids ds)))
+    (p/remove-migration-id ds "a")
+    (is (= ["b" "c"] (p/applied-migration-ids ds)))))
+
+(deftest store-ignores-the-connection-key-fn
+  ;; An app-level :keys default (namespaced keywords here) must not change
+  ;; what the store reads back.
+  (let [conn (sqlite/open ":memory:" {:keys (fn [s] (keyword "db" s))})
+        ds (rt/sql-database conn)]
+    (p/add-migration-id ds "001")
+    (is (= ["001"] (p/applied-migration-ids ds)))
+    (rt/migrate {:datastore ds :migrations [(migration "001")]})
+    (is (= ["001"] (p/applied-migration-ids ds)))))
+
+(deftest ids-with-quotes
+  (let [ds (rt/sql-database (fresh-conn))]
+    (p/add-migration-id ds "it's")
+    (is (= ["it's"] (p/applied-migration-ids ds)))
+    (p/remove-migration-id ds "it's")
+    (is (= [] (p/applied-migration-ids ds)))))
+
+(deftest migrate-and-rollback
+  (let [conn (fresh-conn)
+        ds (rt/sql-database conn)
+        cfg {:datastore ds :migrations [(migration "001-first") (migration "002-second")]}]
+    (rt/migrate cfg)
+    (is (= ["m_001_first" "m_002_second" "ragtime_migrations"] (tables conn)))
+    (is (= ["001-first" "002-second"] (p/applied-migration-ids ds)))
+    (rt/rollback cfg)
+    (is (= ["m_001_first" "ragtime_migrations"] (tables conn)))
+    (is (= ["001-first"] (p/applied-migration-ids ds)))
+    (rt/rollback cfg 1)
+    (is (= ["ragtime_migrations"] (tables conn)))
+    (is (= [] (p/applied-migration-ids ds)))
+    (rt/migrate cfg)
+    (is (= ["m_001_first" "m_002_second" "ragtime_migrations"] (tables conn)))))
+
+(deftest raise-error-on-unknown-applied-id
+  ;; ragtime's default strategy: an applied id that is not in the history is
+  ;; a conflict, not something to silently skip.
+  (let [conn (fresh-conn)
+        ds (rt/sql-database conn)
+        m1 (migration "001-first")
+        m2 (migration "002-second")]
+    (rt/migrate {:datastore ds :migrations [m1 m2]})
+    (is (thrown? Exception (rt/migrate {:datastore ds :migrations [m1]})))))
+
+(deftest statements-run-in-a-transaction
+  (let [conn (fresh-conn)
+        ds (rt/sql-database conn)
+        broken (rt/sql-migration {:id "003-broken"
+                                  :up ["create table t1 (x integer)" "this is not sql"]
+                                  :down ["drop table t1"]})]
+    (is (thrown? Exception (rt/migrate {:datastore ds :migrations [broken]})))
+    (is (= ["ragtime_migrations"] (tables conn)))
+    (is (= [] (p/applied-migration-ids ds)))))
+
+(deftest parameterized-statements
+  ;; A bare string and a [sql & params] vector, side by side.
+  (let [conn (fresh-conn)
+        ds (rt/sql-database conn)
+        seeded (rt/sql-migration {:id "004-seed"
+                                  :up ["create table k (v text)"
+                                       ["insert into k (v) values (?)" "seeded"]]
+                                  :down ["drop table k"]})]
+    (rt/migrate {:datastore ds :migrations [seeded]})
+    (is (= [{:v "seeded"}] (sql/query conn ["select v from k"])))))

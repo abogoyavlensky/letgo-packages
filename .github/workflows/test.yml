@@ -1,0 +1,65 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+    tags: ['*-v*']
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changed-package selection diffs against the base branch or
+          # the previous push; a shallow clone has neither.
+          fetch-depth: 0
+
+      # lg, lgx and go, at the versions in .mise.toml.
+      - uses: jdx/mise-action@v3
+
+      # Every package runs on a custom lg that lgx builds with the Go
+      # toolchain (:lg-runtime :built). The build is cached by its inputs,
+      # so a run with unchanged lgx.edn files reuses the runtime.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.lgx/runtimes
+          key: runtimes-${{ runner.os }}-${{ hashFiles('**/lgx.edn') }}
+          restore-keys: runtimes-${{ runner.os }}-
+
+      - name: Test the changed packages
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CHANGED_PATHS_FILE: ${{ runner.temp }}/changed-paths.txt
+        run: |
+          set -euo pipefail
+          packages="$(bash .github/scripts/changed-packages.sh)"
+          echo "packages to test: ${packages:-<none>}"
+          # sql/lgx.edn pins the *released* shim (see "Releasing" in the
+          # README), so a change to sql/shim/ would otherwise be tested
+          # against the published Go module, not the checked-out code. Flip
+          # the coord to the working tree for this run only - the same move
+          # a shim author makes locally.
+          if grep -q '^sql/shim/' "$CHANGED_PATHS_FILE"; then
+            echo "sql/shim/ changed: testing against the checked-out shim"
+            sed -i 's#sql/shim {:go/version "[^"]*"}#sql/shim {:go/local "shim"}#' sql/lgx.edn
+            grep -n 'sql/shim' sql/lgx.edn
+          fi
+          failed=0
+          for pkg in $packages; do
+            if [ -d "$pkg/test" ]; then
+              echo "==> $pkg: lgx test"
+              (cd "$pkg" && lgx test) || failed=1
+            else
+              echo "==> $pkg: no test/ directory, skipped"
+            fi
+          done
+          exit $failed

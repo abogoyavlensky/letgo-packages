@@ -1,5 +1,10 @@
 {:paths ["src"]
 
+ ;; For this package's own `lgx test`. A consumer's runtime decision is its
+ ;; own: lgx ignores a dep's top-level keys.
+ :lg-runtime :built
+ :lg-version "1.13.0"
+
  :deps {;; Bindings for the stdlib API the veneer sits on. No driver here —
         ;; that is what keeps this package driver-agnostic; drivers (sqlite,
         ;; postgres) depend on this package and add their own.

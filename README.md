@@ -19,6 +19,7 @@ Depend on one with `:deps/root`:
 | [`sqlite/`](sqlite/) | SQLite driver over `sql/`, via the pure-Go `modernc.org/sqlite` |
 | [`postgres/`](postgres/) | PostgreSQL driver over `sql/`, via the pure-Go `github.com/jackc/pgx/v5` |
 | [`wails/`](wails/) | Desktop apps over [Wails v3](https://v3.wails.io): a webview frontend with let-go handlers behind it |
+| [`ragtime/`](ragtime/) | Schema migrations with [ragtime](https://github.com/weavejester/ragtime)'s core: a `DataStore` and a `Migration` over `sql/`, so any driver package works |
 
 The driver packages are thin: `open`/`close!` plus re-exports of the
 `sql` API. An app depends on one driver package; lgx's transitive
@@ -47,9 +48,12 @@ Two kinds of tags live in this repo:
 | Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
-Only `sql` and `wails` have a shim. `sqlite` and `postgres` have none —
-they inherit `sql`'s through their `:local/root "../sql"` dep, so a shim
-change in `sql` is a package bump for them too.
+Only `sql` and `wails` have a shim. `sqlite`, `postgres` and `ragtime`
+have none — the SQL ones inherit `sql`'s through their `:local/root "../sql"`
+dep, so a shim change in `sql` is a package bump for them too, and their
+release is the package tag alone. A `:local/root` sibling dep never affects
+a consumer's runtime cache: only a `:go/local` coord or `LGX_LETGO_REPLACE`
+makes lgx rebuild the runtime on every command.
 
 When a shim changed, in this order:
 

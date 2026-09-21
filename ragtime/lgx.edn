@@ -1,0 +1,25 @@
+{:paths ["src"]
+
+ ;; For this package's own `lgx test`. A consumer's runtime decision is its
+ ;; own: lgx ignores a dep's top-level keys.
+ :lg-runtime :built
+ :lg-version "1.13.0"
+
+ :deps {;; The driver-agnostic sql layer the DataStore is written against.
+        abogoyavlensky/letgo-sql {:local/root "../sql"}
+
+        ;; ragtime's database-independent core: protocols, strategies,
+        ;; repl/migrate + rollback, reporter. The JDBC modules are separate
+        ;; artifacts; the exclusions stop lgx warning about the umbrella
+        ;; project.clj's :mvn siblings on every consumer's install.
+        dev.weavejester/ragtime
+        {:git/url "https://github.com/weavejester/ragtime"
+         :git/tag "0.12.1"
+         :deps/root "core/src"
+         :exclusions [dev.weavejester/ragtime.core
+                      dev.weavejester/ragtime.sql
+                      dev.weavejester/ragtime.jdbc
+                      dev.weavejester/ragtime.next-jdbc]}}
+
+ ;; The tests need a driver; sqlite is the in-memory one.
+ :contexts {:test {:extra-deps {abogoyavlensky/letgo-sqlite {:local/root "../sqlite"}}}}}
