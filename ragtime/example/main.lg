@@ -1,0 +1,51 @@
+;; End-to-end exercise of the ragtime package: a two-step schema history
+;; migrated up, rolled back one step, and migrated again, with the applied
+;; ids checked after each move.
+(ns main
+  (:require [ragtime.letgo :as rt]
+            [ragtime.protocols :as p]
+            [sqlite.core :as sqlite]))
+
+(defn- check [label ok]
+  (if ok
+    (println " ✓" label)
+    (do (println " ✗" label)
+        (throw (ex-info (str "assertion failed: " label) {})))))
+
+;; Each statement is what sql.core/execute! takes: a string, or a
+;; [sql & params] vector. Format them with HoneySQL if you like data DDL.
+(def migrations
+  [(rt/sql-migration {:id "001-create-people"
+                      :up ["create table people (id integer primary key,
+                                                 name text not null,
+                                                 email text)"]
+                      :down ["drop table people"]})
+   (rt/sql-migration {:id "002-index-people-email"
+                      :up ["create index people_email_idx on people (email)"]
+                      :down ["drop index people_email_idx"]})])
+
+(defn -main []
+  (let [conn (sqlite/open ":memory:")
+        db (rt/sql-database conn)
+        cfg {:datastore db :migrations migrations}]
+    (rt/migrate cfg)
+    (check "both migrations applied"
+           (= ["001-create-people" "002-index-people-email"]
+              (p/applied-migration-ids db)))
+    (check "the schema is there"
+           (= [{:sql/update-count 1}]
+              (sqlite/execute! conn ["insert into people (name, email) values (?, ?)"
+                                     "Ada" "ada@example.org"])))
+    (rt/rollback cfg)
+    (check "rollback removed the last id"
+           (= ["001-create-people"] (p/applied-migration-ids db)))
+    (rt/migrate cfg)
+    (check "migrate reapplied it"
+           (= ["001-create-people" "002-index-people-email"]
+              (p/applied-migration-ids db)))
+    (sqlite/close! conn)
+    (println "all checks passed")))
+
+;; lg -b runs top-level forms at compile time; the guard keeps the bundle
+;; from running the example while it is built.
+(when-not *compiling-aot* (-main))
