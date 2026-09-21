@@ -6,12 +6,23 @@
 #   a push to master                        -> packages touched since the previous push
 #
 # A package is a top-level directory holding an lgx.edn. Every package sits on
-# sql/, so a change there - or to the CI files themselves - tests all of them.
+# sql/, so a change there - or to the CI files themselves - tests all of them;
+# a package whose tests run over another package (ragtime over sqlite) is
+# tested when that package changes.
 #
 # Inputs (GitHub Actions' env, or set by hand): GITHUB_REF, GITHUB_EVENT_NAME,
-# GITHUB_BASE_REF, BEFORE_SHA. A git diff that fails exits non-zero: an empty
-# list from a broken diff would pass CI while testing nothing.
+# GITHUB_BASE_REF, BEFORE_SHA. When CHANGED_PATHS_FILE is set, the changed
+# paths are written there too (the workflow reads it for the shim override).
+# A git diff that fails exits non-zero: an empty list from a broken diff would
+# pass CI while testing nothing.
 set -euo pipefail
+
+# Packages whose test suites exercise another package: <changed> -> <dependents>.
+dependents_of() {
+    case "$1" in
+        sqlite) echo "ragtime" ;;
+    esac
+}
 
 all_packages() {
     for f in */lgx.edn; do
@@ -48,6 +59,10 @@ case "${GITHUB_EVENT_NAME:-}" in
         ;;
 esac
 
+if [[ -n "${CHANGED_PATHS_FILE:-}" ]]; then
+    printf '%s\n' "$changed" > "$CHANGED_PATHS_FILE"
+fi
+
 selected=()
 run_all=""
 while IFS= read -r path; do
@@ -60,6 +75,9 @@ while IFS= read -r path; do
         run_all="sql changed"
     elif [[ -f "$top/lgx.edn" ]]; then
         selected+=("$top")
+        for dep in $(dependents_of "$top"); do
+            selected+=("$dep")
+        done
     fi
 done <<< "$changed"
 
