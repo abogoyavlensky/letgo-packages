@@ -137,6 +137,10 @@ func formatTime(t time.Time, colType string) string {
 	case colType == "TIME":
 		return t.Format("15:04:05.999999")
 	case colType == "TIMETZ":
+		// DuckDB offsets may carry seconds; name them only when present.
+		if _, off := t.Zone(); off%60 != 0 {
+			return t.Format("15:04:05.999999Z07:00:00")
+		}
 		return t.Format("15:04:05.999999Z07:00")
 	case colType == "TIMESTAMPTZ":
 		return t.UTC().Format(time.RFC3339Nano)
