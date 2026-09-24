@@ -15,8 +15,8 @@
         ;; the version equal to the require in shim/go.mod.
         github.com/duckdb/duckdb-go/v2 {:go/version "v2.10505.0"}
 
-        ;; The hand-written seam: converts DuckDB's Go values into plain
-        ;; let-go values. :go/local while the wrapper is unreleased; becomes
-        ;; {:go/version "vX.Y.Z"} when it is tagged (see "Releasing" in the
-        ;; root README).
-        github.com/abogoyavlensky/letgo-packages/duckdb/shim {:go/local "shim"}}}
+        ;; The hand-written seam that converts DuckDB's Go values into plain
+        ;; let-go values, released as the nested Go module tagged
+        ;; duckdb/shim/vX.Y.Z. To work on it, flip this to {:go/local "shim"}
+        ;; locally and do not commit that (see "Releasing" in the root README).
+        github.com/abogoyavlensky/letgo-packages/duckdb/shim {:go/version "v0.1.0"}}}
