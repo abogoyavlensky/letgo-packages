@@ -17,7 +17,9 @@
 ;;
 ;; A *connectable* is either a map {:sql/handle h :sql/opts m} (what open
 ;; returns, and what with-transaction binds) or a bare boxed *sql.DB /
-;; *sql.Tx, treated as {:sql/handle h :sql/opts {}}.
+;; *sql.Tx, treated as {:sql/handle h :sql/opts {}}. A driver package may add
+;; :sql/scan-row, a fn reading the current row of a *sql.Rows into its values
+;; in column order; without one, shim/ScanRow is used.
 (ns sql.core
   (:require [sql.shim :as shim]))
 
@@ -97,15 +99,15 @@
 
 (defn- read-rows!
   "Realize a *sql.Rows cursor as a vector of maps keyed by (kf column-name),
-   closing the cursor. (.Next rows) returns false for both end-of-rows and a
+   each row's values read by `scan`, closing the cursor. (.Next rows) returns false for both end-of-rows and a
    mid-stream read failure, so (.Err rows) is checked once iteration stops —
    otherwise a truncated result set would look like success."
-  [rows kf]
+  [rows kf scan]
   (try
     (let [cols (mapv kf (.Columns rows))]
       (loop [acc []]
         (if (.Next rows)
-          (recur (conj acc (zipmap cols (shim/ScanRow rows))))
+          (recur (conj acc (zipmap cols (scan rows))))
           (do
             (when-let [err (.Err rows)]
               (throw (ex-info (str "sql: reading rows failed: " err)
@@ -114,15 +116,15 @@
     (finally (.Close rows))))
 
 (defn- read-one-row!
-  "Read at most one row as a map keyed by (kf column-name), then close the
-   cursor — execute-one! must not realize an unbounded result set. nil for
-   an empty result set; (.Err rows) is checked only on that path, since a
+  "Read at most one row as a map keyed by (kf column-name), its values read
+   by `scan`, then close the cursor — execute-one! must not realize an
+   unbounded result set. nil for an empty result set; (.Err rows) is checked only on that path, since a
    found row stops iteration deliberately."
-  [rows kf]
+  [rows kf scan]
   (try
     (let [cols (mapv kf (.Columns rows))]
       (if (.Next rows)
-        (zipmap cols (shim/ScanRow rows))
+        (zipmap cols (scan rows))
         (do
           (when-let [err (.Err rows)]
             (throw (ex-info (str "sql: reading rows failed: " err)
@@ -139,7 +141,9 @@
         [q params] (split-statement statement)
         handle (:sql/handle conn)]
     (if (rows-path? q opts)
-      {:result (reader (shim/Query handle q params) (key-fn (:keys opts)))}
+      {:result (reader (shim/Query handle q params)
+                       (key-fn (:keys opts))
+                       (or (:sql/scan-row conn) shim/ScanRow))}
       {:update-count (.RowsAffected (shim/Exec handle q params))})))
 
 (defn execute!
@@ -174,7 +178,7 @@
 
 (defn begin-tx
   "Internal (with-transaction's runtime). Begin a transaction, returning a
-   tx connectable carrying the parent's opts. Throws if `connectable` is
+   tx connectable carrying the parent's opts and :sql/scan-row. Throws if `connectable` is
    already a transaction — database/sql has no savepoints, so nesting would
    silently open a second independent transaction."
   [connectable]
@@ -184,6 +188,7 @@
                       {:sql/connectable conn})))
     {:sql/handle (.Begin (:sql/handle conn))
      :sql/opts (or (:sql/opts conn) {})
+     :sql/scan-row (:sql/scan-row conn)
      :sql/tx? true}))
 
 (defn commit-tx!

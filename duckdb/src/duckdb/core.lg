@@ -1,0 +1,49 @@
+;; duckdb.core — the DuckDB driver package: open/close! plus re-exports of
+;; the driver-agnostic sql.core API, so a consumer needs one require.
+;;
+;; The driver is github.com/duckdb/duckdb-go/v2 (cgo over a static
+;; libduckdb), which registers itself with database/sql as "duckdb" when the
+;; runtime links it. Rows are read by duckdb.shim/ScanRow, which turns
+;; DuckDB's Go values (*big.Int, time.Time, duckdb.Decimal, ...) into plain
+;; let-go values; see the README's value table.
+(ns duckdb.core
+  (:require [duckdb.shim :as shim]
+            [sql]
+            [sql.core]))
+
+(def ^:private driver "duckdb")
+
+(defn open
+  "Open the DuckDB database at `path` — a file path, or \"\" / \":memory:\"
+   for an in-memory one. A file is locked by the process that opens it, so
+   open it once and share the connectable. Returns a connectable for the fns
+   below. opts become the connection's defaults — e.g.
+   {:keys :unqualified-lower} — merged under per-call opts."
+  ([path] (open path nil))
+  ([path opts]
+   {:sql/handle (sql/Open driver (if (= ":memory:" path) "" path))
+    :sql/opts (merge {:keys :unqualified} opts)
+    :sql/scan-row shim/ScanRow}))
+
+(defn close!
+  "Close a connectable (or bare handle). Returns the close error as a
+   value, nil on success."
+  [conn]
+  (.Close (if (map? conn) (:sql/handle conn) conn)))
+
+(def execute!
+  "See sql.core/execute!."
+  sql.core/execute!)
+
+(def execute-one!
+  "See sql.core/execute-one!."
+  sql.core/execute-one!)
+
+(def query
+  "See sql.core/query."
+  sql.core/query)
+
+(defmacro with-transaction
+  "See sql.core/with-transaction."
+  [bindings & body]
+  `(sql.core/with-transaction ~bindings ~@body))

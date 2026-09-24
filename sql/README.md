@@ -33,6 +33,26 @@ A bare boxed handle (e.g. straight from `sql/Open`) is accepted too and
 treated as `{:sql/handle h :sql/opts {}}`. Opts merge per call: the
 connectable's `:sql/opts` under, the call's opts over.
 
+### Driver hook: `:sql/scan-row`
+
+A driver package can add one more key to the connectable its `open`
+returns:
+
+```clojure
+{:sql/handle   h
+ :sql/opts     {...}
+ :sql/scan-row f}   ; (f rows) -> the current row's values, in column order
+```
+
+`f` receives the boxed `*sql.Rows` already positioned on a row (`.Next`
+has returned true) and returns anything `zipmap` accepts. Without the
+key, `sql.shim/ScanRow` reads the row and the boxing layer converts
+each value. `with-transaction` copies the key onto the `tx` connectable,
+so reads inside a transaction convert the same way. The `duckdb`
+package uses it to turn DuckDB's Go types (`*big.Int`, `time.Time`,
+`duckdb.Decimal`, ...) into plain let-go values; `sqlite` and `postgres`
+do not set it.
+
 ### Rows or an update count?
 
 `execute!` runs anything, but `database/sql` splits execution into

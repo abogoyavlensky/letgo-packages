@@ -1,0 +1,127 @@
+;; Tests for duckdb.core over an in-memory database: the value conversions
+;; duckdb.shim/ScanRow performs (one deftest per row of the README's value
+;; table), and the :sql/scan-row hook reaching every read path.
+;; Run with: lgx test  (from duckdb/)
+
+(ns duckdb.core-test
+  (:require [clojure.test :refer [deftest is]]
+            [duckdb.core :as db]))
+
+(def ^:private conn (db/open ""))
+
+(defn- v
+  "The value of `expr`, selected as the single column v."
+  [expr]
+  (:v (db/execute-one! conn [(str "select " expr " as v")])))
+
+(defn- v-from
+  "The column v of a full `select`, for expressions that need a FROM."
+  [q]
+  (:v (db/execute-one! conn [q])))
+
+;; --- integers -------------------------------------------------------------
+
+(deftest integer-is-an-int
+  (is (= 42 (v "42::INTEGER"))))
+
+(deftest small-ubigint-is-an-int
+  (is (= 42 (v "42::UBIGINT"))))
+
+(deftest ubigint-past-int64-is-a-string
+  (is (= "18446744073709551615" (v "18446744073709551615::UBIGINT"))))
+
+(deftest sum-over-integer-is-an-int
+  ;; DuckDB widens sum() over INTEGER/BIGINT to HUGEINT (*big.Int in Go)
+  (is (= 3 (v-from "select sum(x) as v from (values (1::INTEGER), (2)) t(x)"))))
+
+(deftest hugeint-past-int64-is-a-string
+  (is (= "170141183460469231731687303715884105727"
+         (v "170141183460469231731687303715884105727::HUGEINT"))))
+
+(deftest uhugeint-past-int64-is-a-string
+  (is (= "340282366920938463463374607431768211455"
+         (v "340282366920938463463374607431768211455::UHUGEINT"))))
+
+;; --- other scalars --------------------------------------------------------
+
+(deftest double-is-a-float
+  (is (= 1.5 (v "1.5::DOUBLE"))))
+
+(deftest decimal-is-an-exact-string
+  (is (= "12.34" (v "12.34::DECIMAL(10,2)"))))
+
+(deftest varchar-boolean-null-enum
+  (is (= "hello" (v "'hello'")))
+  (is (= true (v "true")))
+  (is (nil? (v "NULL")))
+  (is (= "b" (v "'b'::ENUM('a', 'b')"))))
+
+(deftest blob-is-a-raw-byte-string
+  (let [b (v "'\\xAA\\xBB'::BLOB")]
+    (is (string? b))
+    (is (= 2 (count b)))))
+
+(deftest uuid-is-canonical-text
+  (is (= "4b5c0e53-7a3f-4a8e-9a55-1f1d0c7f4e11"
+         (v "'4b5c0e53-7a3f-4a8e-9a55-1f1d0c7f4e11'::UUID"))))
+
+;; --- dates and times ------------------------------------------------------
+
+(deftest date-is-iso
+  (is (= "2026-09-23" (v "DATE '2026-09-23'"))))
+
+(deftest time-of-day
+  (is (= "10:11:12" (v "TIME '10:11:12'"))))
+
+(deftest time-with-zone
+  (is (= "10:11:12+02:00" (v "TIMETZ '10:11:12+02'")))
+  (is (= "10:11:12+02:00:30" (v "TIMETZ '10:11:12+02:00:30'"))))
+
+(deftest timestamp-is-iso
+  (is (= "2026-09-23T10:11:12" (v "TIMESTAMP '2026-09-23 10:11:12'"))))
+
+(deftest timestamp-trims-fraction
+  (is (= "2026-09-23T10:11:12.5" (v "TIMESTAMP '2026-09-23 10:11:12.5'"))))
+
+(deftest timestamp-ns
+  (is (= "2026-09-23T10:11:12.123456789"
+         (v "TIMESTAMP_NS '2026-09-23 10:11:12.123456789'"))))
+
+(deftest timestamptz-is-utc
+  (is (= "2026-09-23T08:11:12Z" (v "TIMESTAMPTZ '2026-09-23 10:11:12+02'"))))
+
+(deftest interval-is-a-map
+  (is (= {:months 0 :days 0 :micros 5400000000} (v "INTERVAL 90 MINUTE"))))
+
+;; --- nested ---------------------------------------------------------------
+
+(deftest list-is-a-vector
+  (is (= [1 2 3] (v "[1, 2, 3]"))))
+
+(deftest array-is-a-vector
+  (is (= [1 2] (v "[1, 2]::INTEGER[2]"))))
+
+(deftest struct-has-keyword-keys
+  (is (= {:a 1 :b [1 2]} (v "{'a': 1, 'b': [1, 2]}"))))
+
+(deftest map-keeps-its-keys
+  (is (= {"k1" 1 "k2" 2} (v "MAP {'k1': 1, 'k2': 2}"))))
+
+(deftest nested-timestamp-is-rfc3339
+  ;; no column type reaches a nested value, so the generic UTC rule applies
+  (is (= ["2026-09-23T10:11:12Z"] (v "[TIMESTAMP '2026-09-23 10:11:12']"))))
+
+(deftest json-object
+  (is (= {:a 1.0} (v "'{\"a\": 1}'::JSON"))))
+
+;; --- the hook reaches every read path -------------------------------------
+
+(deftest query-converts-every-row
+  (is (= [{:n 1 :s 1} {:n 2 :s 2}]
+         (db/query conn ["select x as n, sum(x) as s from (values (1), (2)) t(x)
+                          group by x order by x"]))))
+
+(deftest transaction-keeps-the-scanner
+  (is (= 3 (db/with-transaction [tx conn]
+             (:v (db/execute-one! tx ["select sum(x) as v
+                                       from (values (1::INTEGER), (2)) t(x)"]))))))

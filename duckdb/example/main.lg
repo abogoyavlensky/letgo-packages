@@ -1,0 +1,113 @@
+;; End-to-end exercise of the duckdb driver package over the sql layer:
+;; every API entry point, an analytics query, and a file-backed database,
+;; with values asserted as native let-go values.
+(ns main
+  (:require [duckdb.core :as db]))
+
+(def ^:private path "/tmp/lgx-duckdb-example.duckdb")
+
+(defn- check [label ok]
+  (if ok
+    (println " ✓" label)
+    (do (println " ✗" label)
+        (throw (ex-info (str "assertion failed: " label) {})))))
+
+(defn- api-tour [conn]
+  ;; execute! for DDL
+  (db/execute! conn ["create table people (id integer primary key,
+                                           name varchar not null,
+                                           age integer,
+                                           height double,
+                                           active boolean,
+                                           notes varchar)"])
+
+  ;; execute! for parameterized inserts -> [{:sql/update-count n}]
+  (check "insert returns [{:sql/update-count 1}]"
+         (= [{:sql/update-count 1}]
+            (db/execute! conn ["insert into people values (?, ?, ?, ?, ?, ?)"
+                               1 "Ada" 36 1.63 true nil])))
+  (db/execute! conn ["insert into people values (?, ?, ?, ?, ?, ?)"
+                     2 "Grace" 45 1.5 false "COBOL"])
+
+  ;; query (sugar for execute!) -> vector of row maps
+  (let [rows (db/query conn ["select * from people order by id"])
+        ada (first rows)]
+    (check "query returns two rows" (= 2 (count rows)))
+    (check "text is a native string" (= "Ada" (:name ada)))
+    (check "integer round-trips" (= 36 (:age ada)))
+    (check "double round-trips" (= 1.63 (:height ada)))
+    (check "boolean round-trips as a real boolean" (= true (:active ada)))
+    (check "NULL is nil" (nil? (:notes ada))))
+
+  ;; execute-one! -> first row, nil on empty, update count on DML
+  (check "execute-one! returns the row map"
+         (= "Grace" (:name (db/execute-one! conn ["select name from people where age > ?" 40]))))
+  (check "execute-one! is nil on an empty result"
+         (nil? (db/execute-one! conn ["select * from people where age > ?" 99])))
+  (check "execute-one! DML returns {:sql/update-count 1}"
+         (= {:sql/update-count 1}
+            (db/execute-one! conn ["update people set notes = ? where name = ?"
+                                   "analytical engine" "Ada"])))
+
+  ;; with-transaction committing, and rolling back on a throw
+  (db/with-transaction [tx conn]
+    (db/execute! tx ["insert into people (id, name, age) values (?, ?, ?)" 3 "Edsger" 72]))
+  (check "transaction committed"
+         (= 3 (:n (db/execute-one! conn ["select count(*) as n from people"]))))
+  (let [thrown (try
+                 (db/with-transaction [tx conn]
+                   (db/execute! tx ["insert into people (id, name) values (?, ?)" 4 "Nobody"])
+                   (throw (ex-info "boom" {})))
+                 (catch Throwable e (ex-message e)))]
+    (check "the body's exception is rethrown" (= "boom" thrown)))
+  (check "rollback undid the insert"
+         (nil? (db/execute-one! conn ["select * from people where id = 4"])))
+
+  ;; per-call opts: :keys override
+  (check ":keys :unqualified-lower lower-cases columns"
+         (= "Ada" (:mixedcase (db/execute-one! conn ["select name as MixedCase from people where id = 1"]
+                                               {:keys :unqualified-lower})))))
+
+(defn- analytics [conn]
+  (db/execute! conn ["create table visits (ts timestamp, visitor varchar, ms integer)"])
+  ;; One multi-row VALUES insert: far faster than a statement per row.
+  (db/execute! conn ["insert into visits values
+                        ('2026-09-01 10:00:00', 'a', 100),
+                        ('2026-09-01 11:00:00', 'b', 200),
+                        ('2026-09-01 12:00:00', 'a', 300),
+                        ('2026-09-02 09:30:00', 'c', 400)"])
+  (let [days (db/query conn ["select ts::date as day,
+                                     count(*) as views,
+                                     count(distinct visitor) as uniques,
+                                     sum(ms) as total_ms
+                              from visits group by day order by day"])]
+    (check "daily rollup has one row per day" (= 2 (count days)))
+    (check "DATE arrives as an ISO string" (= "2026-09-01" (:day (first days))))
+    (check "sum() arrives as a plain int, no cast" (= 600 (:total_ms (first days))))
+    (check "count(distinct) is a plain int" (= 2 (:uniques (first days))))
+    (check "TIMESTAMP arrives as an ISO string"
+           (= "2026-09-02T09:30:00"
+              (:ts (db/execute-one! conn ["select max(ts) as ts from visits"]))))))
+
+(defn- file-backed []
+  (os/sh "rm" "-f" path)
+  (let [c (db/open path)]
+    (db/execute! c ["create table t (x integer)"])
+    (db/execute! c ["insert into t values (1), (2), (3)"])
+    (db/close! c))
+  (let [c (db/open path)]
+    (try
+      (check "a file database survives close and reopen"
+             (= 6 (:s (db/execute-one! c ["select sum(x) as s from t"]))))
+      (finally (db/close! c)))))
+
+(defn -main []
+  (let [conn (db/open "")]
+    (try
+      (api-tour conn)
+      (analytics conn)
+      (finally (db/close! conn))))
+  (file-backed)
+  (println "all checks passed"))
+
+(when-not *compiling-aot* (-main))

@@ -18,6 +18,7 @@ Depend on one with `:deps/root`:
 | [`sql/`](sql/) | The driver-agnostic SQL layer: `database/sql` bindings, a Go shim, and a next.jdbc-shaped API (`execute!`, `execute-one!`, `query`, `with-transaction`) |
 | [`sqlite/`](sqlite/) | SQLite driver over `sql/`, via the pure-Go `modernc.org/sqlite` |
 | [`postgres/`](postgres/) | PostgreSQL driver over `sql/`, via the pure-Go `github.com/jackc/pgx/v5` |
+| [`duckdb/`](duckdb/) | DuckDB, an in-process analytical database, over `sql/`, via the cgo `github.com/duckdb/duckdb-go/v2`; DuckDB values arrive as plain let-go values |
 | [`wails/`](wails/) | Desktop apps over [Wails v3](https://v3.wails.io): a webview frontend with let-go handlers behind it |
 | [`ragtime/`](ragtime/) | Schema migrations with [ragtime](https://github.com/weavejester/ragtime)'s core: a `DataStore` and a `Migration` over `sql/`, so any driver package works |
 
@@ -29,9 +30,16 @@ custom-runtime build.
 
 ## Rules for driver packages
 
-**Pure Go only.** A driver that needs cgo would force a C toolchain on
-every user and break cross-compiled builds. Both current drivers are
-pure Go; any future one must be too.
+**Pure Go, unless no pure-Go driver exists.** A driver that needs cgo
+forces a C toolchain on every user and breaks cross-compiled builds, so
+a pure-Go driver always wins when there is one: sqlite and postgres are
+pure Go for that reason.
+
+`duckdb/` is the exception, because DuckDB has no pure-Go
+implementation — its only Go driver links the C++ library. It pays the
+full price: a C toolchain per developer, native builds only, and a
+binary about 75 MB larger. Its README puts that first, so nobody finds
+out at deploy time.
 
 This rule is about *drivers*. `wails/` is cgo by necessity — the platform
 webview is a C library on Linux and macOS — and it pays exactly the price
@@ -48,10 +56,11 @@ Two kinds of tags live in this repo:
 | Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
-Only `sql` and `wails` have a shim. `sqlite`, `postgres` and `ragtime`
-have none — the SQL ones inherit `sql`'s through their `:local/root "../sql"`
-dep, so a shim change in `sql` is a package bump for them too, and their
-release is the package tag alone. A `:local/root` sibling dep never affects
+Only `sql`, `wails` and `duckdb` have a shim. `sqlite`, `postgres` and
+`ragtime` have none — the SQL ones inherit `sql`'s through their `:local/root "../sql"`
+dep, so a shim change in `sql` is a package bump for them too (and for
+`duckdb`, which inherits it alongside its own), and their release is the
+package tag alone. A `:local/root` sibling dep never affects
 a consumer's runtime cache: only a `:go/local` coord or `LGX_LETGO_REPLACE`
 makes lgx rebuild the runtime on every command.
 
@@ -70,8 +79,8 @@ from GitHub, so the Go tag has to exist before the commit that references
 it, and the package tag has to follow that commit so consumers receive the
 flipped `lgx.edn`. When only `.lg` files changed, do step 4 alone.
 
-**The `v0.0.0` let-go require** in `sql/shim/go.mod` and
-`wails/shim/go.mod` is deliberate. A shim has no let-go version of its
+**The `v0.0.0` let-go require** in `sql/shim/go.mod`,
+`wails/shim/go.mod` and `duckdb/shim/go.mod` is deliberate. A shim has no let-go version of its
 own: Go's minimal version selection resolves the placeholder to whatever
 the consumer's `:lg-version` pins, so the project's pin stays
 authoritative. A real version here would set a floor and silently bump an
