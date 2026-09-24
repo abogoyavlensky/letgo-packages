@@ -1,0 +1,7 @@
+{:paths []
+ :main "main.lg"
+ :lg-version "1.13.0"
+ :lg-runtime :built
+ :targets {:bin {:out "bin/app"}}
+
+ :deps {abogoyavlensky/letgo-duckdb {:local/root ".."}}}
