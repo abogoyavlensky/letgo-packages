@@ -6,7 +6,11 @@
 ;; runtime links it. Rows are read by duckdb.shim/ScanRow, which turns
 ;; DuckDB's Go values (*big.Int, time.Time, duckdb.Decimal, ...) into plain
 ;; let-go values; see the README's value table.
+;;
+;; let-go's clojure.core defines open and close!, which JVM Clojure's does not;
+;; excluding them keeps the require free of redefinition warnings.
 (ns duckdb.core
+  (:refer-clojure :exclude [open close!])
   (:require [duckdb.shim :as shim]
             [sql]
             [sql.core]))

@@ -25,7 +25,7 @@ Depend on one with `:deps/root`:
 The driver packages are thin: `open`/`close!` plus re-exports of the
 `sql` API. An app depends on one driver package; lgx's transitive
 `:go/*` dep collection pulls the `sql` layer's bindings and shim up
-through the driver's `:local/root` dep and links everything in one
+through the driver's `sql` dep and links everything in one
 custom-runtime build.
 
 ## Rules for driver packages
@@ -57,12 +57,16 @@ Two kinds of tags live in this repo:
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
 Only `sql`, `wails` and `duckdb` have a shim. `sqlite`, `postgres` and
-`ragtime` have none — the SQL ones inherit `sql`'s through their `:local/root "../sql"`
-dep, so a shim change in `sql` is a package bump for them too (and for
-`duckdb`, which inherits it alongside its own), and their release is the
-package tag alone. A `:local/root` sibling dep never affects
-a consumer's runtime cache: only a `:go/local` coord or `LGX_LETGO_REPLACE`
-makes lgx rebuild the runtime on every command.
+`ragtime` have none, and their release is the package tag alone. All four
+SQL packages depend on `sql` by package tag
+(`{:git/url ... :git/tag "sql-vX.Y.Z" :deps/root "sql"}`) and inherit its
+shim through it. Every package in a release round names the same
+`sql-vX.Y.Z`, byte for byte: lgx then resolves the four coords to one
+checkout, and a consumer that mixes two of them gets no `already resolved`
+warning. The local `{:local/root "../sql"}` lives only in each driver's
+`:test` context, so `lgx test` runs against the working tree. ragtime has
+no such override: its tests pull sqlite, which names the tag, and a local
+`sql` beside it would clash.
 
 When a shim changed, in this order:
 
@@ -78,6 +82,14 @@ The order matters: the coord in step 3 names a tag that `go get` fetches
 from GitHub, so the Go tag has to exist before the commit that references
 it, and the package tag has to follow that commit so consumers receive the
 flipped `lgx.edn`. When only `.lg` files changed, do step 4 alone.
+
+When `sql/` changed, release it before its dependents:
+
+1. Release `sql` itself: the shim steps above if its shim changed, then
+   tag `sql-vX.Y.Z` and push.
+2. Set the `letgo-sql` coord in `sqlite`, `postgres`, `duckdb` and
+   `ragtime` to that tag and commit.
+3. Tag the four packages `<pkg>-vX.Y.Z` on that commit and push.
 
 **The `v0.0.0` let-go require** in `sql/shim/go.mod`,
 `wails/shim/go.mod` and `duckdb/shim/go.mod` is deliberate. A shim has no let-go version of its

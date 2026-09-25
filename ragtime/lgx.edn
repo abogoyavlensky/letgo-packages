@@ -5,8 +5,12 @@
  :lg-runtime :built
  :lg-version "1.13.0"
 
- :deps {;; The driver-agnostic sql layer the DataStore is written against.
-        abogoyavlensky/letgo-sql {:local/root "../sql"}
+ :deps {;; The driver-agnostic sql layer the DataStore is written against,
+        ;; pinned by the same tag the driver packages name.
+        abogoyavlensky/letgo-sql
+        {:git/url "https://github.com/abogoyavlensky/letgo-packages"
+         :git/tag "sql-v0.2.0"
+         :deps/root "sql"}
 
         ;; ragtime's database-independent core: protocols, strategies,
         ;; repl/migrate + rollback, reporter. The JDBC modules are separate
@@ -21,5 +25,8 @@
                       dev.weavejester/ragtime.jdbc
                       dev.weavejester/ragtime.next-jdbc]}}
 
- ;; The tests need a driver; sqlite is the in-memory one.
- :contexts {:test {:extra-deps {abogoyavlensky/letgo-sqlite {:local/root "../sqlite"}}}}}
+ ;; The tests need a driver; sqlite is the in-memory one. No local letgo-sql
+ ;; override here: sqlite names sql by tag, so a local sql would differ from
+ ;; that coord and lgx would warn. ragtime tests against the tag it pins.
+ :contexts {:test {:extra-paths ["test"]
+                   :extra-deps {abogoyavlensky/letgo-sqlite {:local/root "../sqlite"}}}}}

@@ -98,7 +98,7 @@ SQLite notes: the database has no boolean storage class, so an inserted
 
 ```
 sqlite/
-├── lgx.edn        deps: the sql package (:local/root) + modernc.org/sqlite
+├── lgx.edn        deps: the sql package (git tag) + modernc.org/sqlite
 ├── src/sqlite/
 │   └── core.lg    open / close! + re-exports of the sql.core API
 └── example/       a runnable app used to verify the whole stack

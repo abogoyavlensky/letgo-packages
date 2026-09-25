@@ -1,9 +1,18 @@
 {:paths ["src"]
 
  :deps {;; The driver-agnostic layer: database/sql bindings, the shim, and
-        ;; the sql.core veneer all arrive transitively from here.
-        abogoyavlensky/letgo-sql {:local/root "../sql"}
+        ;; the sql.core veneer all arrive transitively from here. Pinned by
+        ;; tag so every package names the same coord; the :test context
+        ;; below points it at the working tree.
+        abogoyavlensky/letgo-sql
+        {:git/url "https://github.com/abogoyavlensky/letgo-packages"
+         :git/tag "sql-v0.2.0"
+         :deps/root "sql"}
 
         ;; Pure Go, so no cgo, no C compiler, and clean cross-builds.
         ;; Link-only: it registers itself with database/sql from init.
-        modernc.org/sqlite {:go/version "v1.57.0"}}}
+        modernc.org/sqlite {:go/version "v1.57.0"}}
+
+ ;; `lgx test` runs against the working-tree sql, not the pinned tag.
+ :contexts {:test {:extra-paths ["test"]
+                   :extra-deps {abogoyavlensky/letgo-sql {:local/root "../sql"}}}}}
