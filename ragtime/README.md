@@ -83,7 +83,7 @@ as `:strategy` in the config.
 
 ```
 ragtime/
-├── lgx.edn                deps: sql (:local/root) and ragtime core (git,
+├── lgx.edn                deps: sql (git tag) and ragtime core (git,
 │                          :deps/root "core/src", the JDBC modules excluded)
 ├── src/ragtime/
 │   └── letgo.lg           sql-database, sql-migration, migrate, rollback
