@@ -6,8 +6,13 @@
  :lg-version "1.13.0"
 
  :deps {;; The driver-agnostic layer: database/sql bindings, the shim, and
-        ;; the sql.core veneer all arrive transitively from here.
-        abogoyavlensky/letgo-sql {:local/root "../sql"}
+        ;; the sql.core veneer all arrive transitively from here. Pinned by
+        ;; tag so every package names the same coord; the :test context
+        ;; below points it at the working tree.
+        abogoyavlensky/letgo-sql
+        {:git/url "https://github.com/abogoyavlensky/letgo-packages"
+         :git/tag "sql-v0.2.0"
+         :deps/root "sql"}
 
         ;; NOT pure Go: the driver is cgo over a prebuilt static libduckdb, so
         ;; builds need a C toolchain and cannot cross-compile (see README).
@@ -19,4 +24,8 @@
         ;; let-go values, released as the nested Go module tagged
         ;; duckdb/shim/vX.Y.Z. To work on it, flip this to {:go/local "shim"}
         ;; locally and do not commit that (see "Releasing" in the root README).
-        github.com/abogoyavlensky/letgo-packages/duckdb/shim {:go/version "v0.1.0"}}}
+        github.com/abogoyavlensky/letgo-packages/duckdb/shim {:go/version "v0.1.0"}}
+
+ ;; `lgx test` runs against the working-tree sql, not the pinned tag.
+ :contexts {:test {:extra-paths ["test"]
+                   :extra-deps {abogoyavlensky/letgo-sql {:local/root "../sql"}}}}}
