@@ -3,7 +3,11 @@
 ;;
 ;; The driver is modernc.org/sqlite (pure Go), which registers itself with
 ;; database/sql as "sqlite" when the runtime links it.
+;;
+;; let-go's clojure.core defines open and close!, which JVM Clojure's does not;
+;; excluding them keeps the require free of redefinition warnings.
 (ns sqlite.core
+  (:refer-clojure :exclude [open close!])
   (:require [sql]
             [sql.core]))
 
