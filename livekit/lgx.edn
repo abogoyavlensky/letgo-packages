@@ -1,0 +1,33 @@
+{:paths ["src"]
+
+ ;; For this package's own `lgx test`. A consumer's runtime decision is its
+ ;; own: lgx ignores a dep's top-level keys.
+ :lg-runtime :built
+ :lg-version "1.13.0"
+
+ :deps {;; The hand-written seam, and the only Go in the stack, released as
+        ;; the nested Go module tagged livekit/shim/vX.Y.Z. It flips to
+        ;; {:go/version "vX.Y.Z" :go/replace {...}} at release; until then it
+        ;; is the working tree (see "Releasing" in the root README).
+        ;;
+        ;; livekit-server only compiles against LiveKit's forks of three pion
+        ;; modules, and Go ignores a dependency's replace directives, so the
+        ;; replace block from livekit-server v1.13.7's go.mod rides on this
+        ;; coord and reaches every consumer's runtime. Copy it again from the
+        ;; new tag's go.mod whenever the livekit-server pin moves.
+        github.com/abogoyavlensky/letgo-packages/livekit/shim
+        {:go/local "shim"
+         :go/replace {"github.com/pion/webrtc/v4" "github.com/livekit/webrtc-pion/v4@v4.2.18-warp.1"
+                      "github.com/pion/dtls/v3"   "github.com/livekit/dtls/v3@v3.1.5-warp.1"
+                      "github.com/pion/ice/v4"    "github.com/livekit/ice/v4@v4.4.0-warp.2"}}
+
+        ;; livekit.integrant defines the :livekit/server component. A consumer
+        ;; that never requires it pays only this fetch. integrant depends on
+        ;; weavejester/dependency, which lgx does not read from a plain
+        ;; Clojure lib's deps.edn, so both are listed.
+        dev.weavejester/dependency
+        {:git/url "https://github.com/weavejester/dependency"
+         :git/tag "1.0.1"}
+        dev.weavejester/integrant
+        {:git/url "https://github.com/weavejester/integrant"
+         :git/tag "1.0.1"}}}
