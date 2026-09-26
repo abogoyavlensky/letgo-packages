@@ -53,6 +53,15 @@ jobs:
             sed -i 's#sql/shim {:go/version "[^"]*"}#sql/shim {:go/local "shim"}#' sql/lgx.edn
             grep -n 'sql/shim' sql/lgx.edn
           fi
+          # Same for livekit/shim/. Its coord also carries a :go/replace map
+          # (the pion forks) that the flip must keep, so match only the
+          # {:go/version "..."} opening - the file's one :go/version - and
+          # leave the rest of the coord map as it is.
+          if grep -q '^livekit/shim/' "$CHANGED_PATHS_FILE"; then
+            echo "livekit/shim/ changed: testing against the checked-out shim"
+            sed -i 's#{:go/version "[^"]*"#{:go/local "shim"#' livekit/lgx.edn
+            grep -n -A1 'livekit/shim' livekit/lgx.edn
+          fi
           failed=0
           for pkg in $packages; do
             if [ -d "$pkg/test" ]; then
