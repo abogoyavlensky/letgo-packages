@@ -153,6 +153,10 @@ func HTTPPort(s *Server) int { return s.srv.HTTPPort() }
 // A let-go map is a *vm.PersistentMap whose Seq yields vm.MapEntry, so a
 // type switch on vm.Map alone silently turns every map into a list of
 // pairs.
+//
+// Unlike the wails copy, a map is recognised by its type tag before the
+// first-entry check: an empty map has no entry to sniff, and a config
+// section like :logging {} must stay a JSON object, not become [].
 func ToGo(v vm.Value) any {
 	if v == nil || v == vm.NIL {
 		return nil
@@ -164,6 +168,17 @@ func ToGo(v vm.Value) any {
 		return string(t)
 	case vm.String:
 		return string(t)
+	}
+	if t := v.Type(); t == vm.MapType || t == vm.SortedMapType {
+		out := map[string]any{}
+		if s, ok := v.(vm.Sequable); ok {
+			for sq := s.Seq(); sq != nil; sq = sq.Next() {
+				if e, ok := sq.First().(vm.MapEntry); ok {
+					out[keyString(e.Key)] = ToGo(e.Value)
+				}
+			}
+		}
+		return out
 	}
 	if s, ok := v.(vm.Sequable); ok {
 		sq := s.Seq()
