@@ -3,6 +3,8 @@
 
 (ns livekit.core-test
   (:require [livekit.core :as lk]
+            [livekit.integrant]
+            [integrant.core :as ig]
             [http]
             [string :as str]
             [clojure.test :refer [deftest is]]))
@@ -62,6 +64,16 @@
   (let [again (lk/start! (config))]
     (is (lk/running? again))
     (lk/stop! again)))
+
+(deftest integrant-component-runs-two-cycles-in-one-process
+  ;; Two init/halt cycles in one process: upstream's metrics init is
+  ;; idempotent and halt releases every port, so a restart works.
+  (dotimes [_ 2]
+    (let [system (ig/init {:livekit/server {:config (config)}})
+          server (:livekit/server system)]
+      (is (lk/running? server))
+      (ig/halt! system)
+      (is (not (lk/running? server))))))
 
 (deftest tokens-authorise-the-room-service
   (let [server (lk/start! (config))]

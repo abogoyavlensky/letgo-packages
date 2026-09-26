@@ -1,0 +1,20 @@
+;; livekit.integrant — the embedded server as an integrant component.
+;;
+;;   {:livekit/server {:config {:port 7880 :keys {"devkey" "..."} ...}}}
+;;
+;; The component's value is the server handle, so another component can
+;; (ig/ref :livekit/server) and call livekit.core/http-port on it. Require
+;; this namespace once, before ig/init, to register the methods.
+(ns livekit.integrant
+  (:require [integrant.core :as ig]
+            [livekit.core :as lk]))
+
+;; A start failure throws out of init-key, which makes ig/init halt what it
+;; already started and rethrow. That is the intended outcome: a failed
+;; start is fatal for the process (see livekit.core/start!).
+(defmethod ig/init-key :livekit/server [_ {:keys [config]}]
+  (lk/start! config))
+
+;; Graceful: waits for connected participants to leave before stopping.
+(defmethod ig/halt-key! :livekit/server [_ server]
+  (lk/stop! server false))

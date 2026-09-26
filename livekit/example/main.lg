@@ -1,9 +1,11 @@
 ;; End-to-end exercise of the livekit package: an SFU embedded in this
-;; binary, started, checked and stopped. Every check throws on a mismatch,
-;; so a clean exit is the pass signal.
+;; binary as an integrant component, started, called and stopped. Every
+;; check throws on a mismatch, so a clean exit is the pass signal.
 (ns main
   (:require [http]
+            [integrant.core :as ig]
             [livekit.core :as lk]
+            [livekit.integrant]
             [string :as str]))
 
 (def api-key "devkey")
@@ -32,9 +34,21 @@
              {:headers {"Authorization" (str "Bearer " token)}
               :content-type "application/json"}))
 
+;; A stand-in for an app's own component: it depends on the server, the
+;; way a real handler would to mint tokens against it.
+(defmethod ig/init-key :app/handler [_ {:keys [livekit]}]
+  {:livekit livekit})
+
+(def system-config
+  {:livekit/server {:config config}
+   :app/handler {:livekit (ig/ref :livekit/server)}})
+
 (defn -main []
-  (let [server (lk/start! config)]
+  (let [system (ig/init system-config)
+        server (:livekit/server system)]
     (check! "server is running" (lk/running? server))
+    (check! "the handler holds the server"
+            (identical? server (:livekit (:app/handler system))))
     (check! "http port is 7890" (= 7890 (lk/http-port server)))
     (let [admin (lk/token api-key api-secret
                           {:identity "example-admin" :room-create true})
@@ -42,7 +56,7 @@
       (check! "CreateRoom answers 200" (= 200 (:status resp)))
       (check! "the created room is named demo"
               (str/includes? (:body resp) "\"demo\"")))
-    (lk/stop! server)
+    (ig/halt! system)
     (check! "server is stopped" (not (lk/running? server)))))
 
 ;; Nothing above starts a server at load time, and this guard keeps
