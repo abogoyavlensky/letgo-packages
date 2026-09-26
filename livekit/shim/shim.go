@@ -22,15 +22,20 @@
 package shim
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/livekit/livekit-server/pkg/config"
 	"github.com/livekit/livekit-server/pkg/routing"
 	"github.com/livekit/livekit-server/pkg/service"
 	"github.com/livekit/livekit-server/pkg/telemetry/prometheus"
+	"github.com/livekit/protocol/auth"
 	"github.com/nooga/let-go/pkg/rt"
 	"github.com/nooga/let-go/pkg/vm"
 )
@@ -145,6 +150,102 @@ func Running(s *Server) bool { return s.srv.IsRunning() }
 // HTTPPort is the port the HTTP and signalling API listens on.
 func HTTPPort(s *Server) int { return s.srv.HTTPPort() }
 
+// Token mints an access token signed with apiKey/secret. opts is a
+// let-go map; every key is optional and unknown keys are ignored:
+//
+//	identity, name, room      strings
+//	ttl-seconds               lifetime, default 6h (upstream's default)
+//	room-join, room-create, room-list, room-admin,
+//	can-publish, can-subscribe, can-publish-data
+//	                          grant booleans
+//	sha256                    the base64 SHA-256 claim a webhook carries
+//
+// VideoGrant is a struct with pointer-typed booleans, which is why this
+// is not reachable through generated bindings.
+func Token(apiKey, secret string, optsVal vm.Value) (string, error) {
+	opts := asMap(optsVal)
+	at := auth.NewAccessToken(apiKey, secret)
+	if s, ok := opts["identity"].(string); ok {
+		at.SetIdentity(s)
+	}
+	if s, ok := opts["name"].(string); ok {
+		at.SetName(s)
+	}
+	if s, ok := opts["sha256"].(string); ok {
+		at.SetSha256(s)
+	}
+	if n, ok := asInt(opts["ttl-seconds"]); ok && n > 0 {
+		at.SetValidFor(time.Duration(n) * time.Second)
+	}
+	grant := &auth.VideoGrant{
+		RoomJoin:   flag(opts, "room-join"),
+		RoomCreate: flag(opts, "room-create"),
+		RoomList:   flag(opts, "room-list"),
+		RoomAdmin:  flag(opts, "room-admin"),
+	}
+	if s, ok := opts["room"].(string); ok {
+		grant.Room = s
+	}
+	// Left nil when absent: upstream reads a nil publish/subscribe
+	// permission as "not restricted", which is not the same as false.
+	if b, ok := opts["can-publish"].(bool); ok {
+		grant.SetCanPublish(b)
+	}
+	if b, ok := opts["can-subscribe"].(bool); ok {
+		grant.SetCanSubscribe(b)
+	}
+	if b, ok := opts["can-publish-data"].(bool); ok {
+		grant.SetCanPublishData(b)
+	}
+	at.SetVideoGrant(grant)
+	return at.ToJWT()
+}
+
+func flag(opts map[string]any, k string) bool {
+	b, _ := opts[k].(bool)
+	return b
+}
+
+// VerifyWebhook reports whether a webhook request is genuine: authHeader
+// is its Authorization header (a leading "Bearer " is tolerated), body
+// its raw body. It is the check protocol/webhook.Receive makes, plus one
+// upstream gets for free: Receive looks the secret up by the token's own
+// issuer, so a token issued by another key never finds this secret.
+// Here the caller hands the secret in, so the issuer has to be matched
+// against apiKey explicitly.
+//
+// Any failure is plain false. A rejected webhook is not actionable
+// beyond rejecting it, and a bool keeps the veneer free of try/catch.
+func VerifyWebhook(authHeader, body, apiKey, secret string) bool {
+	raw := strings.TrimPrefix(authHeader, "Bearer ")
+	if raw == "" || apiKey == "" || secret == "" {
+		return false
+	}
+	v, err := auth.ParseAPIToken(raw)
+	if err != nil || v.APIKey() != apiKey {
+		return false
+	}
+	_, claims, err := v.Verify(secret)
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256([]byte(body))
+	want := base64.StdEncoding.EncodeToString(sum[:])
+	return subtle.ConstantTimeCompare([]byte(claims.Sha256), []byte(want)) == 1
+}
+
+func asInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
+}
+
 // ToGo lowers a let-go value to something encoding/json can marshal.
 // Copied from the wails shim: the shims are independent Go modules, and
 // sharing it would take a third one.
@@ -235,5 +336,7 @@ func init() {
 	ns.Def("Stop", vm.MustBox(Stop))
 	ns.Def("Running", vm.MustBox(Running))
 	ns.Def("HTTPPort", vm.MustBox(HTTPPort))
+	ns.Def("Token", vm.MustBox(Token))
+	ns.Def("VerifyWebhook", vm.MustBox(VerifyWebhook))
 	rt.RegisterNS(ns)
 }

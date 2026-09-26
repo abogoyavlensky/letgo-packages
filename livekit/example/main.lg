@@ -2,7 +2,12 @@
 ;; binary, started, checked and stopped. Every check throws on a mismatch,
 ;; so a clean exit is the pass signal.
 (ns main
-  (:require [livekit.core :as lk]))
+  (:require [http]
+            [livekit.core :as lk]
+            [string :as str]))
+
+(def api-key "devkey")
+(def api-secret "secretsecretsecretsecretsecretsecret")
 
 (def config
   {:port 7890
@@ -11,7 +16,7 @@
          :port_range_start 50000
          :port_range_end 50100
          :use_external_ip false}
-   :keys {"devkey" "secretsecretsecretsecretsecretsecret"}
+   :keys {api-key api-secret}
    :logging {:level "warn"}})
 
 (defn- check! [what ok?]
@@ -19,10 +24,24 @@
     (throw (ex-info (str "check failed: " what) {})))
   (println "ok:" what))
 
+(defn- room-service!
+  "POST a RoomService call to the local server as a token holder."
+  [method token body]
+  (http/post (str "http://127.0.0.1:7890/twirp/livekit.RoomService/" method)
+             body
+             {:headers {"Authorization" (str "Bearer " token)}
+              :content-type "application/json"}))
+
 (defn -main []
   (let [server (lk/start! config)]
     (check! "server is running" (lk/running? server))
     (check! "http port is 7890" (= 7890 (lk/http-port server)))
+    (let [admin (lk/token api-key api-secret
+                          {:identity "example-admin" :room-create true})
+          resp (room-service! "CreateRoom" admin "{\"name\":\"demo\"}")]
+      (check! "CreateRoom answers 200" (= 200 (:status resp)))
+      (check! "the created room is named demo"
+              (str/includes? (:body resp) "\"demo\"")))
     (lk/stop! server)
     (check! "server is stopped" (not (lk/running? server)))))
 

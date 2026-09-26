@@ -43,3 +43,31 @@
   "The port the server's HTTP and signalling API listens on."
   [server]
   (shim/HTTPPort server))
+
+(defn token
+  "Mint an access token (a JWT string) signed with `api-key`/`secret`.
+   opts keys, all optional (unknown keys are ignored):
+
+     :identity          the participant identity; joining a room needs one
+     :name              display name
+     :room              the room the grants apply to
+     :ttl-seconds       lifetime, default 6 hours
+     :room-join :room-create :room-list :room-admin
+     :can-publish :can-subscribe :can-publish-data
+                        grant booleans; the three can-* default to
+                        unrestricted when absent
+     :sha256            the base64 SHA-256 body claim a webhook carries
+
+   A server-side call to the room API uses the admin grants
+   (:room-create, :room-list); a client joining a room gets
+   {:identity .. :room .. :room-join true}."
+  [api-key secret opts]
+  (shim/Token api-key secret opts))
+
+(defn verify-webhook
+  "True when a webhook LiveKit sent is genuine: `auth-header` is the
+   request's Authorization header, `body` its raw body as a string. The
+   token must be issued by `api-key`, signed with `secret`, unexpired, and
+   carry the body's SHA-256. Any failure is false."
+  [auth-header body api-key secret]
+  (shim/VerifyWebhook auth-header body api-key secret))
