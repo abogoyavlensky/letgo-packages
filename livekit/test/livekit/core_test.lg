@@ -1,0 +1,55 @@
+;; Tests for livekit.core against a real embedded server on port 7890.
+;; Run with: lgx test  (from livekit/, with a runtime carrying livekit.shim)
+
+(ns livekit.core-test
+  (:require [livekit.core :as lk]
+            [http]
+            [clojure.test :refer [deftest is]]))
+
+(def api-key "devkey")
+(def api-secret "secretsecretsecretsecretsecretsecret")
+
+(defn config
+  "A loopback-only server. `rtc-tcp` moves the WebRTC TCP port, which is
+   bound while the server is wired, before its HTTP listener."
+  ([] (config 7891))
+  ([rtc-tcp]
+   {:port 7890
+    :bind_addresses ["127.0.0.1"]
+    :rtc {:tcp_port rtc-tcp
+          :port_range_start 50000
+          :port_range_end 50100
+          :use_external_ip false}
+    :keys {api-key api-secret}
+    :logging {:level "warn"}}))
+
+(defn- threw? [f]
+  (try (f) false (catch e true)))
+
+(deftest start-serve-stop
+  (let [server (lk/start! (config))]
+    (try
+      (is (lk/running? server))
+      (is (= 7890 (lk/http-port server)))
+      (is (= 200 (:status (http/get "http://127.0.0.1:7890/" {}))))
+      (finally
+        (lk/stop! server)))
+    (is (not (lk/running? server)))))
+
+(deftest occupied-port-throws-and-leaves-the-first-server-running
+  ;; A second server on the same HTTP port fails at its first net.Listen.
+  ;; It moves the RTC TCP port so that the HTTP port is the only collision,
+  ;; and with a single bind address that listener is the first thing
+  ;; upstream's Start opens, so a failure there leaves nothing behind -
+  ;; which is the only reason the fresh start at the end can succeed. This
+  ;; is not a retry guarantee: a failure after the first listener leaks
+  ;; what was opened (see start!).
+  (let [first-server (lk/start! (config))]
+    (try
+      (is (threw? #(lk/start! (config 7892))))
+      (is (lk/running? first-server))
+      (finally
+        (lk/stop! first-server))))
+  (let [again (lk/start! (config))]
+    (is (lk/running? again))
+    (lk/stop! again)))

@@ -1,11 +1,32 @@
+;; End-to-end exercise of the livekit package: an SFU embedded in this
+;; binary, started, checked and stopped. Every check throws on a mismatch,
+;; so a clean exit is the pass signal.
 (ns main
-  (:require [livekit.shim :as shim]))
+  (:require [livekit.core :as lk]))
 
-(let [s (shim/Start {:port 7890
-                     :bind_addresses ["127.0.0.1"]
-                     :rtc {:tcp_port 7891 :port_range_start 50000
-                           :port_range_end 50100 :use_external_ip false}
-                     :keys {"devkey" "secretsecretsecretsecretsecretsecret"}
-                     :logging {:level "warn"}})]
-  (println (shim/Running s))
-  (shim/Stop s false))
+(def config
+  {:port 7890
+   :bind_addresses ["127.0.0.1"]
+   :rtc {:tcp_port 7891
+         :port_range_start 50000
+         :port_range_end 50100
+         :use_external_ip false}
+   :keys {"devkey" "secretsecretsecretsecretsecretsecret"}
+   :logging {:level "warn"}})
+
+(defn- check! [what ok?]
+  (when-not ok?
+    (throw (ex-info (str "check failed: " what) {})))
+  (println "ok:" what))
+
+(defn -main []
+  (let [server (lk/start! config)]
+    (check! "server is running" (lk/running? server))
+    (check! "http port is 7890" (= 7890 (lk/http-port server)))
+    (lk/stop! server)
+    (check! "server is stopped" (not (lk/running? server)))))
+
+;; Nothing above starts a server at load time, and this guard keeps
+;; `lgx build` from starting one while it bundles.
+(when-not *compiling-aot*
+  (-main))
