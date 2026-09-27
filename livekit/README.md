@@ -30,7 +30,7 @@ cycles in one process, and a single-binary build. The example binary is
  :lg-runtime :built
  :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-livekit {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-                                      :git/tag "livekit-v0.1.0"
+                                      :git/tag "livekit-v0.1.1"
                                       :deps/root "livekit"}}}
 ```
 

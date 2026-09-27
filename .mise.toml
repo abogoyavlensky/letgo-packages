@@ -1,6 +1,6 @@
 [tools]
 lg = "1.13.0"
-lgx = "0.4.1"
+lgx = "0.4.2"
 go = "1.27"
 
 [tool_alias]
