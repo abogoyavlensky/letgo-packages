@@ -13,8 +13,9 @@ cycles in one process, and a single-binary build. The example binary is
 
 ## Requirements
 
-- [lgx](https://github.com/abogoyavlensky/lgx) with `:go/replace`
-  (0.4.1 or newer), and let-go 1.13.0 or newer.
+- [lgx](https://github.com/abogoyavlensky/lgx) 0.4.2 or newer for cached
+  runs. 0.4.1 works (it has `:go/replace`) but rebuilds the runtime on
+  every command. let-go 1.13.0 or newer.
 - The Go toolchain on `PATH`. lgx builds a custom `lg` that links
   livekit-server. The first build downloads LiveKit's module graph and
   takes a minute or more; after that the runtime is cached.
@@ -172,10 +173,11 @@ Both use ports 7890 and 7891 on 127.0.0.1.
 
 ## Development
 
-The shim ships as the tagged Go module `livekit/shim/vX.Y.Z`, which
-`lgx.edn` pins with `:go/version`. To edit it, flip that coord to
-`{:go/local "shim"}` locally, as described in "Releasing" in the root
-README, and keep the `:go/replace` map when you do. To build against a let-go working tree:
+The shim ships in-tree: `lgx.edn` declares it `{:go/local "shim"}`, and a
+release is the `livekit-vX.Y.Z` package tag alone, with no Go module tag.
+Edit `shim/shim.go` and the next `lgx run` or `lgx test` rebuilds the
+runtime; edits to `.lg` files alone reuse it. To build against a let-go
+working tree:
 
 ```
 LGX_LETGO_REPLACE=/path/to/let-go lgx run

@@ -57,9 +57,10 @@ Two kinds of tags live in this repo:
 | Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
-Only `sql`, `wails`, `duckdb` and `livekit` have a shim. `sqlite`, `postgres` and
-`ragtime` have none, and their release is the package tag alone. All four
-SQL packages depend on `sql` by package tag
+Only `sql`, `wails`, `duckdb` and `livekit` have a shim, and only the
+first three cut Go module tags for it (see "In-tree shims" below).
+`sqlite`, `postgres` and `ragtime` have none, and their release is the
+package tag alone. All four SQL packages depend on `sql` by package tag
 (`{:git/url ... :git/tag "sql-vX.Y.Z" :deps/root "sql"}`) and inherit its
 shim through it. Every package in a release round names the same
 `sql-vX.Y.Z`, byte for byte: lgx then resolves the four coords to one
@@ -69,6 +70,16 @@ warning. The local `{:local/root "../sql"}` lives only in each driver's
 no such override: its tests pull sqlite, which names the tag, and a local
 `sql` beside it would clash.
 
+**In-tree shims.** `livekit` keeps its shim under `:go/local` in its
+committed `lgx.edn` (`{:go/local "shim" :go/replace {...}}`) and releases
+with the package tag alone: the `livekit-vX.Y.Z` checkout carries the shim,
+and lgx 0.4.2 or newer reuses the built runtime until the shim's files
+change. There is no Go module tag to cut, no coord to flip, and CI tests the
+working-tree shim as is. New packages with a shim should follow this model.
+livekit is the pilot; the existing `livekit/shim/v0.1.0` tag stays as
+history. The steps below apply to `sql`, `wails` and `duckdb` until each is
+moved over.
+
 When a shim changed, in this order:
 
 1. Tag `<pkg>/shim/vX.Y.Z` on the commit that contains the shim change
@@ -77,7 +88,7 @@ When a shim changed, in this order:
    `go get github.com/abogoyavlensky/letgo-packages/<pkg>/shim@vX.Y.Z`.
    It must report plain `vX.Y.Z`, not a pseudo-version.
 3. Set `<pkg>/lgx.edn` to `{:go/version "vX.Y.Z"}` and commit. Keep any
-   other key on the coord: `livekit`'s carries a `:go/replace` map.
+   other key on the coord.
 4. Tag every affected package `<pkg>-vX.Y.Z` on that commit and push.
 
 The order matters: the coord in step 3 names a tag that `go get` fetches
@@ -114,8 +125,8 @@ record a Go module tag permanently, and lgx caches a `:git/tag` checkout
 under the tag name. Fix forward with a new version.
 
 **Working on a shim.** Flip `<pkg>/lgx.edn` back to `{:go/local "shim"}`
-locally. lgx then rebuilds the runtime on every command — incremental,
-about a second — so edits to `shim.go` take effect, and each `example/`
-picks them up through its `:local/root ".."` dep. Do not commit the
+locally. lgx then rebuilds the runtime whenever the shim's files change (on
+every command before lgx 0.4.2) — incremental, about a second — so edits to
+`shim.go` take effect, and each `example/` picks them up through its `:local/root ".."` dep. Do not commit the
 flip-back; release per the steps above instead. `LGX_LETGO_REPLACE` is
 the separate lever for developing against an uncommitted let-go change.
