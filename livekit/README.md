@@ -172,11 +172,10 @@ Both use ports 7890 and 7891 on 127.0.0.1.
 
 ## Development
 
-The shim ships as the tagged Go module `livekit/shim/vX.Y.Z`. Until the
-first release, `lgx.edn` points at the working tree with
-`{:go/local "shim"}`. After it, flip that coord back locally to edit the
-shim, as described in "Releasing" in the root README, and keep the
-`:go/replace` map when you do. To build against a let-go working tree:
+The shim ships as the tagged Go module `livekit/shim/vX.Y.Z`, which
+`lgx.edn` pins with `:go/version`. To edit it, flip that coord to
+`{:go/local "shim"}` locally, as described in "Releasing" in the root
+README, and keep the `:go/replace` map when you do. To build against a let-go working tree:
 
 ```
 LGX_LETGO_REPLACE=/path/to/let-go lgx run
