@@ -1,0 +1,73 @@
+;; livekit.core — the let-go veneer over the LiveKit server shim.
+;;
+;; A server is started from a config map and stopped through the handle
+;; start! returns. Everything Go-shaped (the config struct, the wired
+;; server, its startup wait) lives in livekit.shim.
+(ns livekit.core
+  (:require [livekit.shim :as shim]))
+
+(defn start!
+  "Start an embedded LiveKit server and return its handle once it accepts
+   connections. `config` is LiveKit's YAML config as a map, keys as strings
+   or keywords (a keyword is read as its name):
+
+     :port            HTTP/signalling port (default 7880)
+     :bind_addresses  addresses to listen on, e.g. [\"127.0.0.1\"]
+     :rtc             WebRTC transport, e.g. {:tcp_port 7881
+                      :port_range_start 50000 :port_range_end 60000
+                      :use_external_ip false}
+     :keys            API key -> secret, e.g. {\"devkey\" \"<32+ chars>\"}
+     :logging         e.g. {:level \"warn\"}
+
+   Unknown keys are an error. Every other key is in LiveKit's config
+   reference: https://docs.livekit.io/home/self-hosting/deployment/
+
+   Throws if the server does not start within 15s. A failed start is fatal
+   for the process: LiveKit does not release what it opened before the
+   failure, so restart rather than retry."
+  [config]
+  (shim/Start config))
+
+(defn stop!
+  "Stop the server and return once it has. Without `force?` (the default)
+   it first waits for connected participants to leave."
+  ([server] (stop! server false))
+  ([server force?] (shim/Stop server (boolean force?))))
+
+(defn running?
+  "True while the server accepts connections."
+  [server]
+  (shim/Running server))
+
+(defn http-port
+  "The port the server's HTTP and signalling API listens on."
+  [server]
+  (shim/HTTPPort server))
+
+(defn token
+  "Mint an access token (a JWT string) signed with `api-key`/`secret`.
+   opts keys, all optional (unknown keys are ignored):
+
+     :identity          the participant identity; joining a room needs one
+     :name              display name
+     :room              the room the grants apply to
+     :ttl-seconds       lifetime, default 6 hours
+     :room-join :room-create :room-list :room-admin
+     :can-publish :can-subscribe :can-publish-data
+                        grant booleans; the three can-* default to
+                        unrestricted when absent
+     :sha256            the base64 SHA-256 body claim a webhook carries
+
+   A server-side call to the room API uses the admin grants
+   (:room-create, :room-list); a client joining a room gets
+   {:identity .. :room .. :room-join true}."
+  [api-key secret opts]
+  (shim/Token api-key secret opts))
+
+(defn verify-webhook
+  "True when a webhook LiveKit sent is genuine: `auth-header` is the
+   request's Authorization header, `body` its raw body as a string. The
+   token must be issued by `api-key`, signed with `secret`, unexpired, and
+   carry the body's SHA-256. Any failure is false."
+  [auth-header body api-key secret]
+  (shim/VerifyWebhook auth-header body api-key secret))

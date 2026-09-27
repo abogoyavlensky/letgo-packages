@@ -1,0 +1,139 @@
+;; Tests for livekit.core against a real embedded server on port 7890.
+;; Run with: lgx test  (from livekit/, with a runtime carrying livekit.shim)
+
+(ns livekit.core-test
+  (:require [livekit.core :as lk]
+            [livekit.integrant]
+            [integrant.core :as ig]
+            [http]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(def api-key "devkey")
+(def api-secret "secretsecretsecretsecretsecretsecret")
+
+(defn config
+  "A loopback-only server. `rtc-tcp` moves the WebRTC TCP port, which is
+   bound while the server is wired, before its HTTP listener."
+  ([] (config 7891))
+  ([rtc-tcp]
+   {:port 7890
+    :bind_addresses ["127.0.0.1"]
+    :rtc {:tcp_port rtc-tcp
+          :port_range_start 50000
+          :port_range_end 50100
+          :use_external_ip false}
+    :keys {api-key api-secret}
+    :logging {:level "warn"}}))
+
+(defn- threw? [f]
+  (try (f) false (catch e true)))
+
+(defn- list-rooms
+  "POST ListRooms to the test server as `token`; the http response map."
+  [token]
+  (http/post "http://127.0.0.1:7890/twirp/livekit.RoomService/ListRooms"
+             "{}"
+             {:headers {"Authorization" (str "Bearer " token)}
+              :content-type "application/json"}))
+
+(deftest start-serve-stop
+  (let [server (lk/start! (config))]
+    (try
+      (is (lk/running? server))
+      (is (= 7890 (lk/http-port server)))
+      (is (= 200 (:status (http/get "http://127.0.0.1:7890/" {}))))
+      (finally
+        (lk/stop! server)))
+    (is (not (lk/running? server)))))
+
+(deftest occupied-port-throws-and-leaves-the-first-server-running
+  ;; A second server on the same HTTP port fails at its first net.Listen.
+  ;; It moves the RTC TCP port so that the HTTP port is the only collision,
+  ;; and with a single bind address that listener is the first thing
+  ;; upstream's Start opens, so a failure there leaves nothing behind -
+  ;; which is the only reason the fresh start at the end can succeed. This
+  ;; is not a retry guarantee: a failure after the first listener leaks
+  ;; what was opened (see start!).
+  (let [first-server (lk/start! (config))]
+    (try
+      (is (threw? #(lk/start! (config 7892))))
+      (is (lk/running? first-server))
+      (finally
+        (lk/stop! first-server))))
+  (let [again (lk/start! (config))]
+    (is (lk/running? again))
+    (lk/stop! again)))
+
+(deftest integrant-component-runs-two-cycles-in-one-process
+  ;; Two init/halt cycles in one process: upstream's metrics init is
+  ;; idempotent and halt releases every port, so a restart works.
+  (dotimes [_ 2]
+    (let [system (ig/init {:livekit/server {:config (config)}})
+          server (:livekit/server system)]
+      (is (lk/running? server))
+      (ig/halt! system)
+      (is (not (lk/running? server))))))
+
+(deftest tokens-authorise-the-room-service
+  (let [server (lk/start! (config))]
+    (try
+      (let [admin (lk/token api-key api-secret {:identity "admin" :room-list true})
+            resp (list-rooms admin)]
+        (is (= 200 (:status resp)))
+        (is (str/includes? (:body resp) "rooms")))
+      (let [nobody (lk/token api-key api-secret {:identity "nobody"})]
+        (is (= 401 (:status (list-rooms nobody)))))
+      (finally
+        (lk/stop! server)))))
+
+;; A webhook as LiveKit signs it: the Authorization header is a JWT issued by
+;; the API key, whose sha256 claim is the base64 SHA-256 of the body.
+(def webhook-body "{\"event\":\"room_started\",\"room\":{\"name\":\"demo\"}}")
+
+;; base64(sha256(webhook-body)). let-go's hash/sha256 returns hex, so the
+;; digest is pinned here rather than recomputed.
+(def webhook-sha "5MsuvI47fuoeKQJ7aQYFjKWbbwJmP/a9J1lu1FVTj14=")
+
+;; An expired webhook token for webhook-body. token cannot mint one: upstream
+;; ToJWT replaces a nonpositive lifetime with its default, and Verify allows a
+;; minute of leeway. Minted once with golang-jwt v5 (HS256, secret
+;; api-secret) from the claims {"iss" "devkey" "iat" 1599990000
+;; "nbf" 1599990000 "exp" 1600000000 "sha256" webhook-sha}; HS256 over fixed
+;; claims is deterministic, so rerunning that reproduces it.
+(def expired-webhook-token
+  (str "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+       "eyJleHAiOjE2MDAwMDAwMDAsImlhdCI6MTU5OTk5MDAwMCwiaXNzIjoiZGV2a2V5Iiwi"
+       "bmJmIjoxNTk5OTkwMDAwLCJzaGEyNTYiOiI1TXN1dkk0N2Z1b2VLUUo3YVFZRmpLV2Ji"
+       "d0ptUC9hOUoxbHUxRlZUajE0PSJ9."
+       "dmWRxJ6a1SOw22JBExYuq64SWdcU-VFI-P4SCR3i8Rg"))
+
+(deftest verify-webhook-accepts-a-genuine-webhook
+  (let [auth (lk/token api-key api-secret {:sha256 webhook-sha})]
+    (is (true? (lk/verify-webhook auth webhook-body api-key api-secret)))))
+
+(deftest verify-webhook-rejects-a-tampered-body
+  (let [auth (lk/token api-key api-secret {:sha256 webhook-sha})]
+    (is (false? (lk/verify-webhook auth (str webhook-body " ") api-key
+                                   api-secret)))))
+
+(deftest verify-webhook-rejects-another-api-key
+  ;; Signed with the right secret but issued by a different key: upstream
+  ;; looks the secret up by the token's issuer, so the key match has to be
+  ;; explicit here.
+  (let [auth (lk/token "otherkey" api-secret {:sha256 webhook-sha})]
+    (is (false? (lk/verify-webhook auth webhook-body api-key api-secret)))))
+
+(deftest verify-webhook-rejects-another-secret
+  (let [auth (lk/token api-key "othersecretothersecretothersecret"
+                       {:sha256 webhook-sha})]
+    (is (false? (lk/verify-webhook auth webhook-body api-key api-secret)))))
+
+(deftest verify-webhook-rejects-an-expired-token
+  (is (false? (lk/verify-webhook expired-webhook-token webhook-body api-key
+                                 api-secret))))
+
+(deftest verify-webhook-rejects-garbage
+  (is (false? (lk/verify-webhook "" webhook-body api-key api-secret)))
+  (is (false? (lk/verify-webhook "not-a-jwt" webhook-body api-key
+                                 api-secret))))

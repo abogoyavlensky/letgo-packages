@@ -43,13 +43,15 @@ jobs:
           set -euo pipefail
           packages="$(bash .github/scripts/changed-packages.sh)"
           echo "packages to test: ${packages:-<none>}"
-          # A package with a Go shim (sql, wails, duckdb) pins the *released*
+          # A package with a Go shim (sql, wails, duckdb, livekit) pins the *released*
           # shim in its lgx.edn (see "Releasing" in the README), so a change
           # to <pkg>/shim/ would otherwise be tested against the published Go
           # module, not the checked-out code. Flip each changed shim's coord
           # to the working tree for this run only - the same move a shim
           # author makes locally. A tag run writes no changed-paths file, and
-          # most runs change no shim: both are no-ops.
+          # most runs change no shim: both are no-ops. The pattern stops after
+          # the version string, so any key that follows it on the coord
+          # (livekit's :go/replace map) survives the flip.
           shim_pkgs=""
           if [ -f "$CHANGED_PATHS_FILE" ]; then
             shim_pkgs="$(grep -o '^[^/]*/shim/' "$CHANGED_PATHS_FILE" | cut -d/ -f1 | sort -u || true)"
@@ -57,7 +59,7 @@ jobs:
           for pkg in $shim_pkgs; do
             [ -f "$pkg/lgx.edn" ] || continue
             echo "$pkg/shim/ changed: testing against the checked-out shim"
-            sed -i "s#$pkg/shim {:go/version \"[^\"]*\"}#$pkg/shim {:go/local \"shim\"}#" "$pkg/lgx.edn"
+            sed -i "s#$pkg/shim {:go/version \"[^\"]*\"#$pkg/shim {:go/local \"shim\"#" "$pkg/lgx.edn"
             grep -n "$pkg/shim" "$pkg/lgx.edn"
           done
           failed=0

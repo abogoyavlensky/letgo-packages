@@ -19,6 +19,7 @@ Depend on one with `:deps/root`:
 | [`sqlite/`](sqlite/) | SQLite driver over `sql/`, via the pure-Go `modernc.org/sqlite` |
 | [`postgres/`](postgres/) | PostgreSQL driver over `sql/`, via the pure-Go `github.com/jackc/pgx/v5` |
 | [`duckdb/`](duckdb/) | DuckDB, an in-process analytical database, over `sql/`, via the cgo `github.com/duckdb/duckdb-go/v2`; DuckDB values arrive as plain let-go values |
+| [`livekit/`](livekit/) | Realtime audio/video: the [LiveKit](https://livekit.io) SFU embedded in the binary, as an integrant component, with join tokens and webhook verification |
 | [`wails/`](wails/) | Desktop apps over [Wails v3](https://v3.wails.io): a webview frontend with let-go handlers behind it |
 | [`ragtime/`](ragtime/) | Schema migrations with [ragtime](https://github.com/weavejester/ragtime)'s core: a `DataStore` and a `Migration` over `sql/`, so any driver package works |
 
@@ -56,7 +57,7 @@ Two kinds of tags live in this repo:
 | Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
-Only `sql`, `wails` and `duckdb` have a shim. `sqlite`, `postgres` and
+Only `sql`, `wails`, `duckdb` and `livekit` have a shim. `sqlite`, `postgres` and
 `ragtime` have none, and their release is the package tag alone. All four
 SQL packages depend on `sql` by package tag
 (`{:git/url ... :git/tag "sql-vX.Y.Z" :deps/root "sql"}`) and inherit its
@@ -75,7 +76,8 @@ When a shim changed, in this order:
 2. From a throwaway module, require let-go first, then
    `go get github.com/abogoyavlensky/letgo-packages/<pkg>/shim@vX.Y.Z`.
    It must report plain `vX.Y.Z`, not a pseudo-version.
-3. Set `<pkg>/lgx.edn` to `{:go/version "vX.Y.Z"}` and commit.
+3. Set `<pkg>/lgx.edn` to `{:go/version "vX.Y.Z"}` and commit. Keep any
+   other key on the coord: `livekit`'s carries a `:go/replace` map.
 4. Tag every affected package `<pkg>-vX.Y.Z` on that commit and push.
 
 The order matters: the coord in step 3 names a tag that `go get` fetches
@@ -92,7 +94,7 @@ When `sql/` changed, release it before its dependents:
 3. Tag the four packages `<pkg>-vX.Y.Z` on that commit and push.
 
 **The `v0.0.0` let-go require** in `sql/shim/go.mod`,
-`wails/shim/go.mod` and `duckdb/shim/go.mod` is deliberate. A shim has no let-go version of its
+`wails/shim/go.mod`, `duckdb/shim/go.mod` and `livekit/shim/go.mod` is deliberate. A shim has no let-go version of its
 own: Go's minimal version selection resolves the placeholder to whatever
 the consumer's `:lg-version` pins, so the project's pin stays
 authoritative. A real version here would set a floor and silently bump an
