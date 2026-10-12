@@ -1,0 +1,187 @@
+;; Tests for otel.core against a fake OTLP receiver on loopback.
+;; Run with: lgx test  (from otel/, with a runtime carrying otel.shim)
+;;
+;; The receiver is a let-go http server that records each request. It cannot
+;; decode protobuf, so these tests prove what was sent where (path, content
+;; type, credential), not what the records say; examples/README cover that
+;; against a real Tracelet.
+
+(ns otel.core-test
+  (:require [otel.core :as otel]
+            [http]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(def ^:private env-vars
+  ["OTEL_EXPORTER_OTLP_ENDPOINT" "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+   "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" "OTEL_EXPORTER_OTLP_HEADERS"
+   "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+   "OTEL_EXPORTER_OTLP_PROTOCOL" "OTEL_SERVICE_NAME"])
+
+(defn- with-env
+  "Run f with the given variables set and every other OTEL one empty (an
+   empty value counts as unset), then empty them all again."
+  [vars f]
+  (doseq [k env-vars] (os/setenv k ""))
+  (doseq [[k v] vars] (os/setenv k v))
+  (try (f)
+       (finally (doseq [k env-vars] (os/setenv k "")))))
+
+(defn- receiver
+  "A fake OTLP receiver: {:url :seen :stop!}. `seen` is an atom of
+   {:path :content-type :authorization :bytes}, one per request. An empty 200
+   is a valid OTLP/HTTP success response."
+  []
+  (let [seen (atom [])
+        srv (http/start (fn [req]
+                          (swap! seen conj {:path (:path req)
+                                            :content-type (:content-type req)
+                                            :authorization (get-in req [:headers "authorization"])
+                                            :bytes (count (str (:body req)))})
+                          {:status 200 :body ""})
+                        "127.0.0.1:0")]
+    {:url (str "http://127.0.0.1:" (:port srv))
+     :seen seen
+     :stop! #(http/stop srv)}))
+
+(defn- paths [rcv] (set (map :path @(:seen rcv))))
+
+(defmacro ^:private with-receiver [[sym] & body]
+  `(let [~sym (receiver)]
+     (try ~@body (finally ((:stop! ~sym))))))
+
+(defn- hex? [s n]
+  (and (string? s) (= n (count s)) (boolean (re-matches #"[0-9a-f]+" s))))
+
+(deftest no-endpoint-gives-a-handle-that-does-nothing
+  (with-env {}
+    (fn []
+      (let [h (otel/start! {:service-name "t"})
+            root (otel/start-span h "root" {:kind :server :attrs {"a" 1}})]
+        (is (some? h))
+        (is (not (otel/enabled? h)))
+        (otel/set-attrs! root {"k" "v" :n 2})
+        (otel/set-error! root "bad")
+        (otel/log! h :warn "hello" {"x" 1} {:span root})
+        (is (= :v (otel/in-span h "child" {:parent root} (fn [_] :v))))
+        (otel/end-span! root)
+        (is (nil? (otel/shutdown! h)))
+        (is (nil? (otel/shutdown! h)))))))
+
+(deftest spans-and-logs-reach-the-receiver-on-shutdown
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:service-name "t"
+                              :endpoint (:url rcv)
+                              :headers {"Authorization" "Bearer tl_test"}})
+              span (otel/start-span h "GET /x" {:kind :server
+                                                :attrs {"http.route" "/x" "n" 3 "ok" true "f" 1.5 "drop" [1]}})]
+          (otel/log! h :error "it broke" {"code" 7} {:span span})
+          (otel/log! h :info "no span" {} {})
+          (otel/end-span! span)
+          (is (empty? @(:seen rcv)) "nothing is sent before the batch is flushed")
+          (is (otel/enabled? h))
+          (otel/shutdown! h)
+          (is (= #{"/v1/traces" "/v1/logs"} (paths rcv)))
+          (doseq [r @(:seen rcv)]
+            (is (= "application/x-protobuf" (:content-type r)))
+            (is (= "Bearer tl_test" (:authorization r)))
+            (is (pos? (:bytes r)))))))))
+
+(deftest in-span-returns-the-value
+  (with-env {}
+    (fn []
+      (let [h (otel/start! {})]
+        (is (= 42 (otel/in-span h "ok" {} (fn [_] 42))))))))
+
+(deftest in-span-rethrows-and-still-ends-the-span
+  ;; A span that was never ended is never exported, so a traces request after
+  ;; shutdown means the throwing one was ended.
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})]
+          (is (thrown? Exception
+                       (otel/in-span h "boom" {} (fn [_] (throw (ex-info "boom" {}))))))
+          (otel/shutdown! h)
+          (is (contains? (paths rcv) "/v1/traces")))))))
+
+(deftest ending-and-shutting-down-twice-is-harmless
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})
+              s (otel/start-span h "s" {})]
+          (otel/end-span! s)
+          (otel/end-span! s)
+          (otel/shutdown! h)
+          (otel/shutdown! h)
+          (is (= 1 (count (filter #(= "/v1/traces" (:path %)) @(:seen rcv))))))))))
+
+(deftest ids-are-hex-and-a-child-shares-its-parents-trace
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})
+              root (otel/start-span h "root" {:kind :server})
+              child (otel/start-span h "child" {:parent root :kind :client})
+              other (otel/start-span h "other" {})]
+          (is (hex? (otel/trace-id root) 32))
+          (is (hex? (otel/span-id root) 16))
+          (is (= (otel/trace-id root) (otel/trace-id child)))
+          (is (not= (otel/span-id root) (otel/span-id child)))
+          (is (not= (otel/trace-id root) (otel/trace-id other)))
+          (doseq [s [child other root]] (otel/end-span! s))
+          (otel/shutdown! h))))))
+
+(deftest the-endpoint-option-is-a-url-and-still-reaches-the-default-paths
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})]
+          (otel/in-span h "s" {} (fn [_] nil))
+          (otel/log! h :warn "w" {} {})
+          (otel/shutdown! h)
+          (is (= #{"/v1/traces" "/v1/logs"} (paths rcv))))))))
+
+(deftest the-environment-wins-over-the-options
+  (with-receiver [from-env]
+    (with-receiver [from-opts]
+      (with-env {"OTEL_EXPORTER_OTLP_ENDPOINT" (:url from-env)
+                 "OTEL_EXPORTER_OTLP_HEADERS" "Authorization=Bearer tl_env"}
+        (fn []
+          (let [h (otel/start! {:endpoint (:url from-opts)
+                                :headers {"Authorization" "Bearer tl_option"}})]
+            (otel/in-span h "s" {} (fn [_] nil))
+            (otel/log! h :warn "w" {} {})
+            (otel/shutdown! h)
+            (is (= #{"/v1/traces" "/v1/logs"} (paths from-env)))
+            (is (empty? @(:seen from-opts)))
+            (is (every? #(= "Bearer tl_env" (:authorization %)) @(:seen from-env)))))))))
+
+(deftest a-signal-specific-variable-moves-only-that-signal
+  (with-receiver [traces]
+    (with-receiver [rest]
+      (with-env {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" (str (:url traces) "/v1/traces")}
+        (fn []
+          (let [h (otel/start! {:endpoint (:url rest)})]
+            (otel/in-span h "s" {} (fn [_] nil))
+            (otel/log! h :warn "w" {} {})
+            (otel/shutdown! h)
+            (is (= #{"/v1/traces"} (paths traces)))
+            (is (= #{"/v1/logs"} (paths rest)))))))))
+
+(deftest the-environment-alone-turns-it-on
+  (with-receiver [rcv]
+    (with-env {"OTEL_EXPORTER_OTLP_ENDPOINT" (:url rcv)}
+      (fn []
+        (let [h (otel/start! {})]
+          (otel/in-span h "s" {} (fn [_] nil))
+          (otel/shutdown! h)
+          (is (contains? (paths rcv) "/v1/traces")))))))
+
+(deftest a-malformed-endpoint-throws
+  (with-env {}
+    (fn []
+      (is (thrown? Exception (otel/start! {:endpoint "http://[::1"}))))))

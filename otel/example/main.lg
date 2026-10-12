@@ -1,0 +1,22 @@
+;; Send one trace (a root span with a child) and two log lines to whatever
+;; the OTEL_EXPORTER_OTLP_* variables point at, then print the trace id.
+;;
+;;   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:8080 \
+;;   OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tl_..." \
+;;   lgx run
+;;
+;; Without an endpoint the handle is a no-op: the program still runs and
+;; prints a trace id, but nothing is sent.
+(ns main
+  (:require [otel.core :as otel]))
+
+(let [h (otel/start! {:service-name "otel-example"})
+      trace-id (atom nil)]
+  (otel/in-span h "example.root" {:kind :server :attrs {"example" true}}
+    (fn [root]
+      (reset! trace-id (otel/trace-id root))
+      (otel/log! h :info "example started" {"step" 1} {})
+      (otel/in-span h "example.child" {:parent root :kind :client :attrs {"n" 2}}
+        (fn [_] (otel/log! h :error "example failed on purpose" {"step" 2} {:span root})))))
+  (otel/shutdown! h)
+  (println (str "trace id: " @trace-id)))
