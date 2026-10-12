@@ -1,0 +1,100 @@
+;; otel.core — the let-go veneer over the Go OpenTelemetry SDK shim.
+;;
+;; Traces and logs over OTLP/HTTP. Handles are opaque; a span's parent is
+;; always passed as an argument, never read from a dynamic var: let-go
+;; 1.13.0 runs every HTTP handler on one shared dynamic-binding stack, so a
+;; "current span" kept in a binding would leak between concurrent requests.
+(ns otel.core
+  (:require [otel.shim :as shim]))
+
+(defn start!
+  "Build the tracer and logger providers and return a handle. `opts`, all
+   optional:
+
+     :service-name  the service.name default
+     :endpoint      http(s)://host:port of an OTLP/HTTP receiver; the
+                    exporters add /v1/traces and /v1/logs
+     :headers       a map sent with every export, e.g.
+                    {\"Authorization\" \"Bearer tl_...\"}
+     :resource      a map of extra resource attributes
+
+   A standard OTEL_* variable always wins over the matching option, per
+   signal: OTEL_EXPORTER_OTLP_ENDPOINT (or _TRACES_/_LOGS_ENDPOINT),
+   OTEL_EXPORTER_OTLP_HEADERS, OTEL_EXPORTER_OTLP_COMPRESSION,
+   OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES, OTEL_TRACES_SAMPLER. So an
+   application default can never override a deployment's destination or
+   credential.
+
+   With no :endpoint and no endpoint variable the handle is a no-op: every
+   other function accepts it and nothing is sent, so callers never branch
+   on whether telemetry is on. Throws only on a malformed endpoint."
+  [opts]
+  (shim/Start (or opts {})))
+
+(defn shutdown!
+  "Flush and stop both providers, waiting at most 5 seconds. A failing
+   flush is printed to stderr, not thrown. Safe on a no-op handle and when
+   called twice. Returns nil."
+  [h]
+  (shim/Shutdown h)
+  nil)
+
+(defn start-span
+  "Start a span and return it. `opts`, all optional:
+
+     :parent  a span, or nil for a new trace
+     :kind    :server, :client or :internal (the default)
+     :attrs   a map; string or keyword keys, string, integer, float or
+              boolean values. Anything else is dropped, never thrown on."
+  [h name opts]
+  (shim/StartSpan h name (or opts {})))
+
+(defn end-span!
+  "End a span. Calling it twice is harmless. Returns nil."
+  [span]
+  (shim/EndSpan span)
+  nil)
+
+(defn set-attrs!
+  "Add attributes (see start-span) to a span. Returns nil."
+  [span attrs]
+  (shim/SetAttrs span attrs)
+  nil)
+
+(defn set-error!
+  "Set the span's status to Error with `message`. Returns nil."
+  [span message]
+  (shim/SetError span (str message))
+  nil)
+
+(defn in-span
+  "Start a span (a child of :parent in `opts`), call `(f span)`, and end the
+   span in a finally. An exception sets the span's status to Error with its
+   message and is rethrown. Returns f's value."
+  [h name opts f]
+  (let [span (start-span h name opts)]
+    (try
+      (f span)
+      (catch Exception e
+        (set-error! span (ex-message e))
+        (throw e))
+      (finally
+        (end-span! span)))))
+
+(defn log!
+  "Emit a log record. `level` is :debug, :info, :warn or :error; `attrs` as
+   in start-span. `opts`: :span, which ties the record to that span's trace
+   and span ids. Returns nil."
+  [h level body attrs opts]
+  (shim/Log h (name level) (str body) (or attrs {}) (or opts {}))
+  nil)
+
+(defn trace-id
+  "The span's trace id: 32 lowercase hex characters."
+  [span]
+  (shim/TraceID span))
+
+(defn span-id
+  "The span's id: 16 lowercase hex characters."
+  [span]
+  (shim/SpanID span))
