@@ -218,6 +218,10 @@ func Start(optsVal vm.Value) (*Handle, error) {
 	}, nil
 }
 
+// Enabled reports whether the handle exports anything: false for the no-op
+// handle Start returns when no endpoint is configured.
+func Enabled(h *Handle) bool { return h != nil && h.lp != nil }
+
 // Shutdown flushes and stops both providers, waiting at most five seconds.
 // A failing flush is printed to stderr rather than returned: it must not
 // crash a process that is already exiting. The second call does nothing.
@@ -427,6 +431,7 @@ func asMap(v vm.Value) map[string]any {
 func init() {
 	ns := vm.NewNamespace("otel.shim")
 	ns.Def("Start", vm.MustBox(Start))
+	ns.Def("Enabled", vm.MustBox(Enabled))
 	ns.Def("Shutdown", vm.MustBox(Shutdown))
 	ns.Def("StartSpan", vm.MustBox(StartSpan))
 	ns.Def("EndSpan", vm.MustBox(EndSpan))

@@ -66,6 +66,7 @@ integer, float or boolean values; anything else is dropped, never thrown on.
 | Function | Behaviour |
 |---|---|
 | `(start! opts)` | Build the tracer and logger providers; returns a handle. `opts`: `:service-name`, `:endpoint`, `:headers`, `:resource`. A no-op handle when no endpoint is configured. Throws only on a malformed endpoint. |
+| `(enabled? h)` | True when the handle exports; false for the no-op handle. |
 | `(shutdown! h)` | Flush and stop both providers, waiting at most 5 s. A failing flush is printed to stderr, not thrown. Safe on a no-op handle and when called twice. |
 | `(start-span h name opts)` | `opts`: `:parent` (a span or nil), `:kind` (`:server`, `:client`, `:internal`; default `:internal`), `:attrs`. |
 | `(end-span! span)` | Ends it. Twice is harmless. |

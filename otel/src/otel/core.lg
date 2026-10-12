@@ -31,6 +31,13 @@
   [opts]
   (shim/Start (or opts {})))
 
+(defn enabled?
+  "True when the handle exports anything; false for the no-op handle start!
+   returns when no endpoint is configured. For a caller that wants to skip
+   its own instrumentation work when telemetry is off."
+  [h]
+  (shim/Enabled h))
+
 (defn shutdown!
   "Flush and stop both providers, waiting at most 5 seconds. A failing
    flush is printed to stderr, not thrown. Safe on a no-op handle and when

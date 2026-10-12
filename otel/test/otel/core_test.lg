@@ -59,6 +59,7 @@
       (let [h (otel/start! {:service-name "t"})
             root (otel/start-span h "root" {:kind :server :attrs {"a" 1}})]
         (is (some? h))
+        (is (not (otel/enabled? h)))
         (otel/set-attrs! root {"k" "v" :n 2})
         (otel/set-error! root "bad")
         (otel/log! h :warn "hello" {"x" 1} {:span root})
@@ -80,6 +81,7 @@
           (otel/log! h :info "no span" {} {})
           (otel/end-span! span)
           (is (empty? @(:seen rcv)) "nothing is sent before the batch is flushed")
+          (is (otel/enabled? h))
           (otel/shutdown! h)
           (is (= #{"/v1/traces" "/v1/logs"} (paths rcv)))
           (doseq [r @(:seen rcv)]
