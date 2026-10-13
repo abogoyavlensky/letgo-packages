@@ -1,6 +1,6 @@
 ;; otel.core — the let-go veneer over the Go OpenTelemetry SDK shim.
 ;;
-;; Traces and logs over OTLP/HTTP. Handles are opaque; a span's parent is
+;; Traces, logs and metrics over OTLP/HTTP. Handles are opaque; a span's parent is
 ;; always passed as an argument, never read from a dynamic var: let-go
 ;; 1.13.0 runs every HTTP handler on one shared dynamic-binding stack, so a
 ;; "current span" kept in a binding would leak between concurrent requests.
@@ -8,20 +8,21 @@
   (:require [otel.shim :as shim]))
 
 (defn start!
-  "Build the tracer and logger providers and return a handle. `opts`, all
+  "Build the tracer, logger and meter providers and return a handle. `opts`, all
    optional:
 
      :service-name  the service.name default
      :endpoint      http(s)://host:port of an OTLP/HTTP receiver; the
-                    exporters add /v1/traces and /v1/logs
+                    exporters add /v1/traces, /v1/logs and /v1/metrics
      :headers       a map sent with every export, e.g.
                     {\"Authorization\" \"Bearer tl_...\"}
      :resource      a map of extra resource attributes
 
    A standard OTEL_* variable always wins over the matching option, per
-   signal: OTEL_EXPORTER_OTLP_ENDPOINT (or _TRACES_/_LOGS_ENDPOINT),
+   signal: OTEL_EXPORTER_OTLP_ENDPOINT (or _TRACES_/_LOGS_/_METRICS_ENDPOINT),
    OTEL_EXPORTER_OTLP_HEADERS, OTEL_EXPORTER_OTLP_COMPRESSION,
-   OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES, OTEL_TRACES_SAMPLER. So an
+   OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES, OTEL_TRACES_SAMPLER,
+   OTEL_METRIC_EXPORT_INTERVAL (milliseconds, default 60000). So an
    application default can never override a deployment's destination or
    credential.
 
@@ -39,7 +40,8 @@
   (shim/Enabled h))
 
 (defn shutdown!
-  "Flush and stop both providers, waiting at most 5 seconds. A failing
+  "Flush and stop the providers, waiting at most 5 seconds. Metrics get a
+   final collection and export. A failing
    flush is printed to stderr, not thrown. Safe on a no-op handle and when
    called twice. Returns nil."
   [h]
@@ -95,6 +97,39 @@
   [h level body attrs opts]
   (shim/Log h (name level) (str body) (or attrs {}) (or opts {}))
   nil)
+
+(defn counter-add!
+  "Add `n` (a positive integer) to the monotonic counter `name`. Instruments
+   are created on first use by name; `opts` (:unit, :description) are read
+   then and ignored afterwards. `attrs` follow start-span's rule. Keep their
+   values bounded (a route pattern, an outcome): every distinct set is a
+   series. Returns nil, and nil on a no-op handle."
+  ([h name n attrs] (counter-add! h name n attrs {}))
+  ([h name n attrs opts]
+   (shim/CounterAdd h name n (or attrs {}) (or opts {}))
+   nil))
+
+(defn record!
+  "Record `v` in the histogram `name`. `opts`, read on the name's first use
+   only: :unit, :description, :buckets (a vector of ascending boundaries, in
+   `:unit`; the SDK's defaults, which suit milliseconds, otherwise).
+   Explicit buckets only: Tracelet does not store exponential histograms.
+   Returns nil."
+  ([h name v attrs] (record! h name v attrs {}))
+  ([h name v attrs opts]
+   (shim/Record h name v (or attrs {}) (or opts {}))
+   nil))
+
+(defn gauge-set!
+  "Set the gauge `name` to `v` for the attribute set `attrs`. The gauge is
+   pushed, not observed: call this when the value changes, and the last value
+   is reported at every export. (An observed gauge would run a let-go
+   function on the SDK's own thread.) `opts`, read on the name's first use
+   only: :unit, :description. Returns nil."
+  ([h name v attrs] (gauge-set! h name v attrs {}))
+  ([h name v attrs opts]
+   (shim/GaugeSet h name v (or attrs {}) (or opts {}))
+   nil))
 
 (defn trace-id
   "The span's trace id: 32 lowercase hex characters."
