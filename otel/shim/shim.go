@@ -1,11 +1,13 @@
-// Package shim wraps the Go OpenTelemetry SDK for let-go: traces and logs
-// over OTLP/HTTP.
+// Package shim wraps the Go OpenTelemetry SDK for let-go: traces, logs and
+// metrics over OTLP/HTTP.
 //
 // Like the LiveKit wrapper, this package uses no generated bindings. The SDK
 // is configured with functional options and returns structs and interfaces
 // (providers, tracers, spans, log records), none of which lgx's
 // -opaque-structs bindings can build or hold. The let-go side sees two
-// opaque handles, *Handle and *Span, and plain maps for options.
+// opaque handles, *Handle and *Span, and plain maps for options. Metric
+// instruments are not handles: they are created on first use by name and kept
+// in the Handle.
 //
 // Configuration is the SDK's own environment (OTEL_EXPORTER_OTLP_ENDPOINT,
 // _HEADERS, _COMPRESSION, OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES,
@@ -29,9 +31,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	otellog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/metric"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -45,9 +50,14 @@ const shutdownTimeout = 5 * time.Second
 // the same everywhere) and nothing leaves the process.
 type Handle struct {
 	tp     *sdktrace.TracerProvider
-	lp     *sdklog.LoggerProvider // nil on a no-op handle
+	lp     *sdklog.LoggerProvider   // nil on a no-op handle
+	mp     *sdkmetric.MeterProvider // nil on a no-op handle
 	tracer trace.Tracer
 	logger otellog.Logger // nil on a no-op handle
+	meter  metric.Meter   // nil on a no-op handle
+
+	// instruments caches metric instruments by kind and name; see instrument.
+	instruments sync.Map
 
 	once sync.Once
 }
@@ -131,7 +141,7 @@ func newResource(ctx context.Context, opts map[string]any) (*resource.Resource, 
 	)
 }
 
-// Start builds the tracer and logger providers. Without an :endpoint option
+// Start builds the tracer, logger and meter providers. Without an :endpoint option
 // and without any OTEL_EXPORTER_OTLP_*ENDPOINT variable it returns a no-op
 // handle. It fails only on a malformed endpoint or resource.
 func Start(optsVal vm.Value) (*Handle, error) {
@@ -141,7 +151,8 @@ func Start(optsVal vm.Value) (*Handle, error) {
 	configured := endpoint != "" || envSet(
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
 		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-		"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+		"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
 
 	if !configured {
 		tp := sdktrace.NewTracerProvider()
@@ -202,6 +213,27 @@ func Start(optsVal vm.Value) (*Handle, error) {
 		return nil, fmt.Errorf("otel: log exporter: %w", err)
 	}
 
+	// Metrics, by the same rule.
+	var mopts []otlpmetrichttp.Option
+	if endpoint != "" && !envSet("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") {
+		mopts = append(mopts, otlpmetrichttp.WithEndpoint(tgt.hostPort))
+		if tgt.insecure {
+			mopts = append(mopts, otlpmetrichttp.WithInsecure())
+		}
+		if tgt.basePath != "" {
+			mopts = append(mopts, otlpmetrichttp.WithURLPath(tgt.basePath+"/v1/metrics"))
+		}
+	}
+	if len(headers) > 0 && !envSet("OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_METRICS_HEADERS") {
+		mopts = append(mopts, otlpmetrichttp.WithHeaders(headers))
+	}
+	mexp, err := otlpmetrichttp.New(ctx, mopts...)
+	if err != nil {
+		_ = texp.Shutdown(ctx)
+		_ = lexp.Shutdown(ctx)
+		return nil, fmt.Errorf("otel: metric exporter: %w", err)
+	}
+
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(texp),
 		sdktrace.WithResource(res),
@@ -210,11 +242,19 @@ func Start(optsVal vm.Value) (*Handle, error) {
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(lexp)),
 		sdklog.WithResource(res),
 	)
+	// The reader collects and exports every 60 s, or every
+	// OTEL_METRIC_EXPORT_INTERVAL ms; Shutdown collects once more.
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(mexp)),
+		sdkmetric.WithResource(res),
+	)
 	return &Handle{
 		tp:     tp,
 		lp:     lp,
+		mp:     mp,
 		tracer: tp.Tracer("otel"),
 		logger: lp.Logger("otel"),
+		meter:  mp.Meter("otel"),
 	}, nil
 }
 
@@ -222,7 +262,7 @@ func Start(optsVal vm.Value) (*Handle, error) {
 // handle Start returns when no endpoint is configured.
 func Enabled(h *Handle) bool { return h != nil && h.lp != nil }
 
-// Shutdown flushes and stops both providers, waiting at most five seconds.
+// Shutdown flushes and stops the providers, waiting at most five seconds.
 // A failing flush is printed to stderr rather than returned: it must not
 // crash a process that is already exiting. The second call does nothing.
 func Shutdown(h *Handle) {
@@ -238,6 +278,11 @@ func Shutdown(h *Handle) {
 		if h.lp != nil {
 			if err := h.lp.Shutdown(ctx); err != nil {
 				fmt.Fprintln(os.Stderr, "otel: shutdown logs:", err)
+			}
+		}
+		if h.mp != nil {
+			if err := h.mp.Shutdown(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, "otel: shutdown metrics:", err)
 			}
 		}
 	})
@@ -315,6 +360,148 @@ func Log(h *Handle, level, body string, attrsVal, optsVal vm.Value) {
 	r.SetBody(attribute.StringValue(body))
 	r.AddAttributes(attrList(ToGo(attrsVal))...)
 	h.logger.Emit(ctx, r)
+}
+
+// failed marks a name whose instrument the SDK refused, so the error is
+// printed once and later calls are silent.
+type failed struct{}
+
+// instrument returns the instrument of the given kind and name, creating it
+// on first use. ok is false when the SDK refused the name. The same name used
+// for two kinds is two instruments, which the SDK reports itself.
+func instrument[T any](h *Handle, kind, name string, create func() (T, error)) (T, bool) {
+	key := kind + ":" + name
+	if v, found := h.instruments.Load(key); found {
+		inst, ok := v.(T)
+		return inst, ok
+	}
+	inst, err := create()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "otel: instrument %s: %v\n", name, err)
+		h.instruments.Store(key, failed{})
+		var zero T
+		return zero, false
+	}
+	// Two goroutines may both create the first one; the SDK hands out the
+	// same instrument for the same name, so whichever is stored is right.
+	v, _ := h.instruments.LoadOrStore(key, inst)
+	got, ok := v.(T)
+	return got, ok
+}
+
+// number reads a lowered let-go number; anything else is not one.
+func number(v any) (float64, bool) {
+	switch t := v.(type) {
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case float64:
+		return t, true
+	}
+	return 0, false
+}
+
+// unitAndDescription reads the :unit and :description instrument options.
+func unitAndDescription(opts map[string]any) (unit, description string) {
+	unit, _ = opts["unit"].(string)
+	description, _ = opts["description"].(string)
+	return unit, description
+}
+
+// CounterAdd adds n to a monotonic counter. Non-positive and non-numeric
+// values are ignored. opts, read on the name's first use only: unit,
+// description.
+func CounterAdd(h *Handle, name string, n vm.Value, attrs, optsVal vm.Value) {
+	if h == nil || h.meter == nil {
+		return
+	}
+	v, ok := number(ToGo(n))
+	if !ok || v < 1 {
+		return
+	}
+	unit, description := unitAndDescription(asMap(optsVal))
+	c, ok := instrument(h, "counter", name, func() (metric.Int64Counter, error) {
+		opts := []metric.Int64CounterOption{}
+		if unit != "" {
+			opts = append(opts, metric.WithUnit(unit))
+		}
+		if description != "" {
+			opts = append(opts, metric.WithDescription(description))
+		}
+		return h.meter.Int64Counter(name, opts...)
+	})
+	if ok {
+		c.Add(context.Background(), int64(v), metric.WithAttributes(attrList(ToGo(attrs))...))
+	}
+}
+
+// Record records one value in an explicit-bucket histogram. Non-numeric
+// values are ignored. opts, read on the name's first use only: unit,
+// description, buckets (ascending boundaries; the SDK's defaults otherwise).
+func Record(h *Handle, name string, v, attrs, optsVal vm.Value) {
+	if h == nil || h.meter == nil {
+		return
+	}
+	f, ok := number(ToGo(v))
+	if !ok {
+		return
+	}
+	opts := asMap(optsVal)
+	unit, description := unitAndDescription(opts)
+	var bounds []float64
+	if list, ok := opts["buckets"].([]any); ok {
+		for _, b := range list {
+			if bound, ok := number(b); ok {
+				bounds = append(bounds, bound)
+			}
+		}
+	}
+	hist, ok := instrument(h, "histogram", name, func() (metric.Float64Histogram, error) {
+		opts := []metric.Float64HistogramOption{}
+		if unit != "" {
+			opts = append(opts, metric.WithUnit(unit))
+		}
+		if description != "" {
+			opts = append(opts, metric.WithDescription(description))
+		}
+		if len(bounds) > 0 {
+			opts = append(opts, metric.WithExplicitBucketBoundaries(bounds...))
+		}
+		return h.meter.Float64Histogram(name, opts...)
+	})
+	if ok {
+		hist.Record(context.Background(), f, metric.WithAttributes(attrList(ToGo(attrs))...))
+	}
+}
+
+// GaugeSet sets a gauge to v. The gauge is synchronous: the caller says
+// when the value changes, and the SDK keeps reporting the last value, so
+// no let-go function is ever called from the SDK's goroutines. Non-numeric
+// values are ignored. opts, read on the name's first use only: unit,
+// description.
+func GaugeSet(h *Handle, name string, v, attrs, optsVal vm.Value) {
+	if h == nil || h.meter == nil {
+		return
+	}
+	f, ok := number(ToGo(v))
+	if !ok {
+		return
+	}
+	unit, description := unitAndDescription(asMap(optsVal))
+	g, ok := instrument(h, "gauge", name, func() (metric.Float64Gauge, error) {
+		opts := []metric.Float64GaugeOption{}
+		if unit != "" {
+			opts = append(opts, metric.WithUnit(unit))
+		}
+		if description != "" {
+			opts = append(opts, metric.WithDescription(description))
+		}
+		return h.meter.Float64Gauge(name, opts...)
+	})
+	if ok {
+		g.Record(context.Background(), f, metric.WithAttributes(attrList(ToGo(attrs))...))
+	}
 }
 
 // TraceID is the span's trace id as 32 lowercase hex characters.
@@ -438,6 +625,9 @@ func init() {
 	ns.Def("SetAttrs", vm.MustBox(SetAttrs))
 	ns.Def("SetError", vm.MustBox(SetError))
 	ns.Def("Log", vm.MustBox(Log))
+	ns.Def("CounterAdd", vm.MustBox(CounterAdd))
+	ns.Def("Record", vm.MustBox(Record))
+	ns.Def("GaugeSet", vm.MustBox(GaugeSet))
 	ns.Def("TraceID", vm.MustBox(TraceID))
 	ns.Def("SpanID", vm.MustBox(SpanID))
 	rt.RegisterNS(ns)
