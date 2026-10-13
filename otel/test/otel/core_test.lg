@@ -14,9 +14,10 @@
 
 (def ^:private env-vars
   ["OTEL_EXPORTER_OTLP_ENDPOINT" "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
-   "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" "OTEL_EXPORTER_OTLP_HEADERS"
-   "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-   "OTEL_EXPORTER_OTLP_PROTOCOL" "OTEL_SERVICE_NAME"])
+   "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+   "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
+   "OTEL_EXPORTER_OTLP_LOGS_HEADERS" "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
+   "OTEL_EXPORTER_OTLP_PROTOCOL" "OTEL_SERVICE_NAME" "OTEL_METRIC_EXPORT_INTERVAL"])
 
 (defn- with-env
   "Run f with the given variables set and every other OTEL one empty (an
@@ -29,7 +30,7 @@
 
 (defn- receiver
   "A fake OTLP receiver: {:url :seen :stop!}. `seen` is an atom of
-   {:path :content-type :authorization :bytes}, one per request. An empty 200
+   {:path :content-type :authorization :bytes :body}, one per request. An empty 200
    is a valid OTLP/HTTP success response."
   []
   (let [seen (atom [])
@@ -37,7 +38,8 @@
                           (swap! seen conj {:path (:path req)
                                             :content-type (:content-type req)
                                             :authorization (get-in req [:headers "authorization"])
-                                            :bytes (count (str (:body req)))})
+                                            :bytes (count (str (:body req)))
+                                            :body (str (:body req))})
                           {:status 200 :body ""})
                         "127.0.0.1:0")]
     {:url (str "http://127.0.0.1:" (:port srv))
@@ -45,6 +47,9 @@
      :stop! #(http/stop srv)}))
 
 (defn- paths [rcv] (set (map :path @(:seen rcv))))
+
+(defn- bodies-to [rcv path]
+  (map :body (filter #(= path (:path %)) @(:seen rcv))))
 
 (defmacro ^:private with-receiver [[sym] & body]
   `(let [~sym (receiver)]
@@ -83,7 +88,7 @@
           (is (empty? @(:seen rcv)) "nothing is sent before the batch is flushed")
           (is (otel/enabled? h))
           (otel/shutdown! h)
-          (is (= #{"/v1/traces" "/v1/logs"} (paths rcv)))
+          (is (= #{"/v1/traces" "/v1/logs" "/v1/metrics"} (paths rcv)))
           (doseq [r @(:seen rcv)]
             (is (= "application/x-protobuf" (:content-type r)))
             (is (= "Bearer tl_test" (:authorization r)))
@@ -143,7 +148,7 @@
           (otel/in-span h "s" {} (fn [_] nil))
           (otel/log! h :warn "w" {} {})
           (otel/shutdown! h)
-          (is (= #{"/v1/traces" "/v1/logs"} (paths rcv))))))))
+          (is (= #{"/v1/traces" "/v1/logs" "/v1/metrics"} (paths rcv))))))))
 
 (deftest the-environment-wins-over-the-options
   (with-receiver [from-env]
@@ -156,7 +161,7 @@
             (otel/in-span h "s" {} (fn [_] nil))
             (otel/log! h :warn "w" {} {})
             (otel/shutdown! h)
-            (is (= #{"/v1/traces" "/v1/logs"} (paths from-env)))
+            (is (= #{"/v1/traces" "/v1/logs" "/v1/metrics"} (paths from-env)))
             (is (empty? @(:seen from-opts)))
             (is (every? #(= "Bearer tl_env" (:authorization %)) @(:seen from-env)))))))))
 
@@ -170,7 +175,7 @@
             (otel/log! h :warn "w" {} {})
             (otel/shutdown! h)
             (is (= #{"/v1/traces"} (paths traces)))
-            (is (= #{"/v1/logs"} (paths rest)))))))))
+            (is (= #{"/v1/logs" "/v1/metrics"} (paths rest)))))))))
 
 (deftest the-environment-alone-turns-it-on
   (with-receiver [rcv]
@@ -185,3 +190,95 @@
   (with-env {}
     (fn []
       (is (thrown? Exception (otel/start! {:endpoint "http://[::1"}))))))
+
+;; Metrics. The fake receiver cannot decode protobuf, so these look for the
+;; metric names and attribute values as literal strings in the body (protobuf
+;; strings are written as they are). Values and units are checked against a
+;; real Tracelet (README).
+
+(deftest metrics-reach-the-receiver-on-shutdown
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:service-name "t"
+                              :endpoint (:url rcv)
+                              :headers {"Authorization" "Bearer tl_test"}})]
+          (otel/counter-add! h "test.counter" 2 {"outcome" "okay-outcome"} {:unit "{request}"})
+          (otel/record! h "test.histogram" 0.25 {"route" "a-route"} {:unit "s" :buckets [0.1 0.5 1]})
+          (otel/gauge-set! h "test.gauge" 3 {"which" "a-which"})
+          (is (not (contains? (paths rcv) "/v1/metrics")) "nothing is sent before the first export")
+          (otel/shutdown! h)
+          (let [metric-requests (filter #(= "/v1/metrics" (:path %)) @(:seen rcv))
+                body (apply str (map :body metric-requests))]
+            (is (seq metric-requests))
+            (is (every? #(= "Bearer tl_test" (:authorization %)) metric-requests))
+            (is (every? #(= "application/x-protobuf" (:content-type %)) metric-requests))
+            (doseq [needle ["test.counter" "okay-outcome" "test.histogram" "a-route" "test.gauge" "a-which"]]
+              (is (str/includes? body needle) needle))))))))
+
+(deftest a-metrics-endpoint-variable-moves-only-the-metrics
+  ;; A per-signal endpoint variable is the full URL, the path included.
+  (with-receiver [metrics]
+    (with-receiver [rest]
+      (with-env {"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" (str (:url metrics) "/v1/metrics")}
+        (fn []
+          (let [h (otel/start! {:endpoint (:url rest)})]
+            (otel/in-span h "s" {} (fn [_] nil))
+            (otel/log! h :warn "w" {} {})
+            (otel/counter-add! h "test.moved" 1 {})
+            (otel/shutdown! h)
+            (is (= #{"/v1/metrics"} (paths metrics)))
+            (is (str/includes? (apply str (bodies-to metrics "/v1/metrics")) "test.moved"))
+            (is (= #{"/v1/traces" "/v1/logs"} (paths rest)))))))))
+
+(deftest a-gauge-survives-another-interval
+  ;; The design relies on a synchronous gauge being exported again, without a
+  ;; new gauge-set!, at the next interval.
+  (with-receiver [rcv]
+    (with-env {"OTEL_METRIC_EXPORT_INTERVAL" "200"}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})]
+          (otel/gauge-set! h "test.steady" 7 {})
+          (sleep 1000)
+          (let [with-gauge (filter #(str/includes? % "test.steady") (bodies-to rcv "/v1/metrics"))]
+            (is (>= (count with-gauge) 2) "exported in more than one interval"))
+          (otel/shutdown! h))))))
+
+(deftest a-counter-takes-only-positive-integers
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})]
+          ;; A refused value leaves no instrument behind, so its name never
+          ;; reaches the receiver.
+          (otel/counter-add! h "test.fraction" 1.9 {})
+          (otel/counter-add! h "test.zero" 0 {})
+          (otel/counter-add! h "test.whole" 4 {})
+          (otel/shutdown! h)
+          (let [body (apply str (bodies-to rcv "/v1/metrics"))]
+            (is (str/includes? body "test.whole"))
+            (is (not (str/includes? body "test.fraction")))
+            (is (not (str/includes? body "test.zero")))))))))
+
+(deftest a-no-op-handle-takes-metrics
+  (with-env {}
+    (fn []
+      (let [h (otel/start! {})]
+        (is (nil? (otel/counter-add! h "n" 1 {"a" "b"})))
+        (is (nil? (otel/record! h "n2" 1.5 {} {:buckets [1 2]})))
+        (is (nil? (otel/gauge-set! h "n3" 1 {})))
+        (is (nil? (otel/shutdown! h)))))))
+
+(deftest bad-metric-input-never-throws
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})]
+          (is (nil? (otel/counter-add! h "" 1 {})))
+          (is (nil? (otel/counter-add! h "bad.counter" "two" {})))
+          (is (nil? (otel/counter-add! h "bad.counter" -1 {})))
+          (is (nil? (otel/record! h "bad.histogram" "x" {} {:buckets :nope})))
+          (is (nil? (otel/record! h "bad.histogram2" 1 {"k" [1 2]} {:buckets [:a "b"]})))
+          (is (nil? (otel/gauge-set! h "bad.gauge" nil {})))
+          (is (nil? (otel/gauge-set! h "bad.gauge" 1 nil)))
+          (otel/shutdown! h))))))
