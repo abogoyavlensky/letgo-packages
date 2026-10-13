@@ -22,7 +22,7 @@ Depend on one with `:deps/root`:
 | [`livekit/`](livekit/) | Realtime audio/video: the [LiveKit](https://livekit.io) SFU embedded in the binary, as an integrant component, with join tokens and webhook verification |
 | [`wails/`](wails/) | Desktop apps over [Wails v3](https://v3.wails.io): a webview frontend with let-go handlers behind it |
 | [`ragtime/`](ragtime/) | Schema migrations with [ragtime](https://github.com/weavejester/ragtime)'s core: a `DataStore` and a `Migration` over `sql/`, so any driver package works |
-| [`otel/`](otel/) | Traces and logs over OTLP/HTTP through the Go [OpenTelemetry](https://opentelemetry.io) SDK: spans with explicit parents, log records tied to them, configured by the standard `OTEL_*` variables |
+| [`otel/`](otel/) | Traces, logs and metrics over OTLP/HTTP through the Go [OpenTelemetry](https://opentelemetry.io) SDK: spans with explicit parents, log records tied to them, counters, histograms and gauges, configured by the standard `OTEL_*` variables |
 
 The driver packages are thin: `open`/`close!` plus re-exports of the
 `sql` API. An app depends on one driver package; lgx's transitive
