@@ -389,6 +389,18 @@ func instrument[T any](h *Handle, kind, name string, create func() (T, error)) (
 	return got, ok
 }
 
+// wholeNumber reads a lowered let-go integer, without passing through a
+// float: a float64 cannot hold every int64, and a fraction is not a count.
+func wholeNumber(v any) (int64, bool) {
+	switch t := v.(type) {
+	case int:
+		return int64(t), true
+	case int64:
+		return t, true
+	}
+	return 0, false
+}
+
 // number reads a lowered let-go number; anything else is not one.
 func number(v any) (float64, bool) {
 	switch t := v.(type) {
@@ -409,14 +421,14 @@ func unitAndDescription(opts map[string]any) (unit, description string) {
 	return unit, description
 }
 
-// CounterAdd adds n to a monotonic counter. Non-positive and non-numeric
-// values are ignored. opts, read on the name's first use only: unit,
+// CounterAdd adds n to a monotonic counter. Anything but a positive integer
+// is ignored. opts, read on the name's first use only: unit,
 // description.
 func CounterAdd(h *Handle, name string, n vm.Value, attrs, optsVal vm.Value) {
 	if h == nil || h.meter == nil {
 		return
 	}
-	v, ok := number(ToGo(n))
+	v, ok := wholeNumber(ToGo(n))
 	if !ok || v < 1 {
 		return
 	}
@@ -432,7 +444,7 @@ func CounterAdd(h *Handle, name string, n vm.Value, attrs, optsVal vm.Value) {
 		return h.meter.Int64Counter(name, opts...)
 	})
 	if ok {
-		c.Add(context.Background(), int64(v), metric.WithAttributes(attrList(ToGo(attrs))...))
+		c.Add(context.Background(), v, metric.WithAttributes(attrList(ToGo(attrs))...))
 	}
 }
 

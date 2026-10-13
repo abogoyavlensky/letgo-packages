@@ -244,6 +244,22 @@
             (is (>= (count with-gauge) 2) "exported in more than one interval"))
           (otel/shutdown! h))))))
 
+(deftest a-counter-takes-only-positive-integers
+  (with-receiver [rcv]
+    (with-env {}
+      (fn []
+        (let [h (otel/start! {:endpoint (:url rcv)})]
+          ;; A refused value leaves no instrument behind, so its name never
+          ;; reaches the receiver.
+          (otel/counter-add! h "test.fraction" 1.9 {})
+          (otel/counter-add! h "test.zero" 0 {})
+          (otel/counter-add! h "test.whole" 4 {})
+          (otel/shutdown! h)
+          (let [body (apply str (bodies-to rcv "/v1/metrics"))]
+            (is (str/includes? body "test.whole"))
+            (is (not (str/includes? body "test.fraction")))
+            (is (not (str/includes? body "test.zero")))))))))
+
 (deftest a-no-op-handle-takes-metrics
   (with-env {}
     (fn []
