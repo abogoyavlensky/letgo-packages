@@ -2,6 +2,7 @@ package shim
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -60,8 +61,8 @@ func InvokeSync(fn vm.Fn) {
 	application.InvokeSync(func() { callback("on-main!", fn) })
 }
 
-// WatchAssets reloads win whenever a file under dir changes, polling the
-// newest modification time every 300ms - a dev convenience for `lgx run`,
+// WatchAssets reloads win whenever a file under dir changes, polling a
+// fingerprint of the tree every 300ms - a dev convenience for `lgx run`,
 // where the frontend is served from disk. It returns a fn of no args that
 // stops the watcher. A missing dir is an error up front; a dir that
 // disappears later just stops triggering.
@@ -71,7 +72,7 @@ func WatchAssets(win *application.WebviewWindow, dir string) (func(), error) {
 	}
 	stop := make(chan struct{})
 	go func() {
-		prev := newestModTime(dir)
+		prev := treeFingerprint(dir)
 		t := time.NewTicker(300 * time.Millisecond)
 		defer t.Stop()
 		for {
@@ -79,7 +80,7 @@ func WatchAssets(win *application.WebviewWindow, dir string) (func(), error) {
 			case <-stop:
 				return
 			case <-t.C:
-				if now := newestModTime(dir); now.After(prev) {
+				if now := treeFingerprint(dir); now != prev {
 					prev = now
 					win.Reload()
 				}
@@ -90,16 +91,22 @@ func WatchAssets(win *application.WebviewWindow, dir string) (func(), error) {
 	return func() { once.Do(func() { close(stop) }) }, nil
 }
 
-func newestModTime(dir string) time.Time {
-	var newest time.Time
-	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+// treeFingerprint hashes every entry's path, size and modification time.
+// Comparing it, rather than the newest mtime, catches an edit to any file
+// even when another one carries a later (or future) timestamp, plus adds,
+// deletes and renames.
+func treeFingerprint(dir string) uint64 {
+	h := fnv.New64a()
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if info, err := d.Info(); err == nil && info.ModTime().After(newest) {
-			newest = info.ModTime()
+		info, err := d.Info()
+		if err != nil {
+			return nil
 		}
+		fmt.Fprintf(h, "%s|%d|%d\n", p, info.Size(), info.ModTime().UnixNano())
 		return nil
 	})
-	return newest
+	return h.Sum64()
 }

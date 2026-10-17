@@ -26,13 +26,21 @@
   (is (str/includes? (message-of #(w/message! (t/app) :shout "T" "B")) ":info")))
 
 (deftest data-dir-is-created-under-the-config-dir
-  (let [base (str (os/temp-dir) "/wails-test-config-" (rand-int 100000000))]
-    (os/setenv "XDG_CONFIG_HOME" base)
-    (let [dir (w/data-dir "lgx-wails-test")]
-      (is (= (str base "/lgx-wails-test") dir))
-      (is (:dir? (os/stat dir))))
-    (is (some? (message-of #(w/data-dir "../escape"))))
-    (os/sh "rm" "-rf" base)))
+  ;; os.UserConfigDir reads XDG_CONFIG_HOME on Linux and $HOME on macOS
+  ;; (~/Library/Application Support), so point both at a temp dir.
+  (let [base (str (os/temp-dir) "/wails-test-config-" (rand-int 100000000))
+        saved {"HOME" (os/getenv "HOME") "XDG_CONFIG_HOME" (os/getenv "XDG_CONFIG_HOME")}]
+    (try
+      (os/setenv "HOME" base)
+      (os/setenv "XDG_CONFIG_HOME" (str base "/.config"))
+      (let [dir (w/data-dir "lgx-wails-test")]
+        (is (str/starts-with? dir base))
+        (is (str/ends-with? dir "/lgx-wails-test"))
+        (is (:dir? (os/stat dir))))
+      (is (some? (message-of #(w/data-dir "../escape"))))
+      (finally
+        (doseq [[k v] saved] (os/setenv k (or v "")))
+        (os/sh "rm" "-rf" base)))))
 
 (deftest watch-assets-returns-a-stop-fn
   (let [stop (w/watch-assets! (t/win) "test/resources/public")]
