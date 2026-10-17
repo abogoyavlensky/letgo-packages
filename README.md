@@ -59,8 +59,8 @@ Two kinds of tags live in this repo:
 | Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
-Only `sql`, `wails`, `duckdb`, `livekit` and `nrepl` have a shim, and only the
-first three cut Go module tags for it (see "In-tree shims" below).
+Only `sql`, `wails`, `duckdb`, `livekit` and `nrepl` have a shim, and only
+`sql` and `duckdb` cut Go module tags for it (see "In-tree shims" below).
 `sqlite`, `postgres` and `ragtime` have none, and their release is the
 package tag alone. All four SQL packages depend on `sql` by package tag
 (`{:git/url ... :git/tag "sql-vX.Y.Z" :deps/root "sql"}`) and inherit its
@@ -78,9 +78,10 @@ with the package tag alone: the `livekit-vX.Y.Z` checkout carries the shim,
 and lgx 0.4.2 or newer reuses the built runtime until the shim's files
 change. There is no Go module tag to cut, no coord to flip, and CI tests the
 working-tree shim as is. New packages with a shim should follow this model.
-livekit is the pilot and `nrepl` follows it; the existing `livekit/shim/v0.1.0` tag stays as
-history. The steps below apply to `sql`, `wails` and `duckdb` until each is
-moved over.
+livekit was the pilot, and `wails` (from wails-v0.2.0) and `nrepl` follow
+it; the existing `livekit/shim/v0.1.0` and `wails/shim/v0.1.0` tags stay as
+history. The steps below apply to `sql` and `duckdb` until each is moved
+over.
 
 When a shim changed, in this order:
 

@@ -1,8 +1,14 @@
 {:paths ["src"]
 
- ;; The hand-written seam, and the only Go in the stack, released as the
- ;; nested Go module tagged wails/shim/vX.Y.Z. To work on it, flip this to
- ;; {:go/local "shim"} locally and do not commit that (see "Releasing" in
- ;; the root README). Wails itself arrives through the shim's own go.mod —
- ;; this package generates no bindings, so it declares no :go/interop.
- :deps {github.com/abogoyavlensky/letgo-packages/wails/shim {:go/version "v0.1.0"}}}
+ ;; For this package's own `lgx test`. A consumer's runtime decision is its
+ ;; own: lgx ignores a dep's top-level keys.
+ :lg-runtime :built
+ :lg-version "1.13.0"
+
+ :deps {;; The hand-written seam, and the only Go in the stack. It ships
+        ;; inside the wails-vX.Y.Z package tag as a local module: there is
+        ;; no separate Go module tag (wails/shim/v0.1.0 stays as history).
+        ;; lgx 0.4.2 or newer reuses the built runtime until the shim's files
+        ;; change. Wails itself arrives through the shim's own go.mod - this
+        ;; package generates no bindings, so it declares no :go/interop.
+        github.com/abogoyavlensky/letgo-packages/wails/shim {:go/local "shim"}}}
