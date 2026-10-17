@@ -1,0 +1,53 @@
+;; The one Wails app the tests share. Wails keeps a process-global
+;; application, so every test namespace goes through `app` here rather than
+;; building its own. It runs in server mode (CGO_ENABLED=0
+;; GOFLAGS=-tags=server): an HTTP server on a free port instead of a window,
+;; with `run!` on a future because it blocks.
+(ns wails.test-app
+  (:require [wails.core :as w]
+            [json :as json]
+            [string :as str]))
+
+(def port (os/free-port))
+
+(defn url [path] (str "http://localhost:" port path))
+
+(defn- up? []
+  (try (some? (:status (http/get (url "/")))) (catch e false)))
+
+(defn- start! []
+  (os/setenv "WAILS_SERVER_PORT" (str port))
+  (let [app (w/new-app {:name "wails-test" :assets-dir "test/resources/public"})
+        win (w/new-window app {:title "test"})]
+    (future (w/run! app))
+    (loop [n 0]
+      (cond
+        (up?) nil
+        (> n 100) (throw (ex-info "wails test app did not come up" {:port port}))
+        :else (do (sleep 100) (recur (inc n)))))
+    {:app app :win win}))
+
+(defonce ^:private started (delay (start!)))
+
+(defn app [] (:app @started))
+(defn win [] (:win @started))
+
+(def ^:private call-id (atom 0))
+
+(defn call
+  "Call the let-go handler `name` the way the frontend does, through the
+   one bound Go method. Returns {:status :body :json}; :json is the decoded
+   body when it parses."
+  [name & args]
+  @started
+  (let [payload {:object 0 :method 0
+                 :args {:call-id (str "t" (swap! call-id inc))
+                        :methodName w/bridge-method
+                        :args [name (vec args)]}}
+        res (http/post (url "/wails/runtime") (json/write-json payload)
+                       {:content-type "application/json"
+                        :headers {"x-wails-client-id" "tests"}})
+        body (:body res)]
+    {:status (:status res)
+     :body body
+     :json (try (json/read-json body) (catch e nil))}))

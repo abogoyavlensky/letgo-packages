@@ -1,0 +1,36 @@
+;; The bridge: a frontend call reaching a let-go handler by name. Wails
+;; answers a string result as plain text and anything else as JSON.
+(ns wails.bridge-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(deftest map-arrives-as-an-object
+  (w/handler! "stats" (fn [] {:runtime "let-go" :items ["a" "b"]}))
+  (let [r (t/call "stats")]
+    (is (= 200 (:status r)))
+    (is (= {"runtime" "let-go" "items" ["a" "b"]} (:json r)))))
+
+(deftest args-arrive-as-let-go-values
+  (w/handler! "greet" (fn [n] (str "Hello, " n "!")))
+  (is (= "Hello, world!" (:body (t/call "greet" "world")))))
+
+(defn hot [] "old")
+
+(deftest a-var-handler-sees-redefinition
+  (w/handler! "hot" #'hot)
+  (is (= "old" (:body (t/call "hot"))))
+  (alter-var-root #'hot (constantly (fn [] "new")))
+  (is (= "new" (:body (t/call "hot")))))
+
+(deftest a-throwing-handler-is-an-error
+  (w/handler! "boom" (fn [] (throw (ex-info "kaboom" {}))))
+  (let [r (t/call "boom")]
+    (is (not= 200 (:status r)))
+    (is (str/includes? (:body r) "kaboom"))))
+
+(deftest an-unknown-name-is-an-error
+  (let [r (t/call "nope")]
+    (is (not= 200 (:status r)))
+    (is (str/includes? (:body r) "nope"))))

@@ -11,4 +11,9 @@
         ;; lgx 0.4.2 or newer reuses the built runtime until the shim's files
         ;; change. Wails itself arrives through the shim's own go.mod - this
         ;; package generates no bindings, so it declares no :go/interop.
-        github.com/abogoyavlensky/letgo-packages/wails/shim {:go/local "shim"}}}
+        github.com/abogoyavlensky/letgo-packages/wails/shim {:go/local "shim"}}
+
+ ;; The tests serve test/resources/public as the frontend. lgx never
+ ;; passes a dep's resource paths to its consumers, so this stays local.
+ :contexts {:test {:extra-paths ["test"]
+                   :extra-resource-paths ["test/resources"]}}}

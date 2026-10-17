@@ -68,7 +68,15 @@ jobs:
           for pkg in $packages; do
             if [ -d "$pkg/test" ]; then
               echo "==> $pkg: lgx test"
-              (cd "$pkg" && lgx test) || failed=1
+              if [ "$pkg" = wails ]; then
+                # The runner has no GTK4/WebKitGTK, so wails tests run in
+                # Wails' cgo-free server mode: an HTTP server instead of a
+                # window. Both vars are needed - a few Wails packages gate
+                # on `linux && cgo` without a `!server` guard.
+                (cd "$pkg" && CGO_ENABLED=0 GOFLAGS=-tags=server lgx test) || failed=1
+              else
+                (cd "$pkg" && lgx test) || failed=1
+              fi
             else
               echo "==> $pkg: no test/ directory, skipped"
             fi
