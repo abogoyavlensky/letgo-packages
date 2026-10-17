@@ -52,6 +52,10 @@ func (h resourceAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// No caching: under `lgx run` the files change underneath the app.
 	w.Header().Set("Cache-Control", "no-store")
+	// Commit the status before the body. An empty resource makes io.Copy
+	// return without a Write, and Wails' native (macOS, Linux) response
+	// writers answer 501 when no header was ever written.
+	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, rc)
 }
 
