@@ -24,11 +24,17 @@
   (alter-var-root #'hot (constantly (fn [] "new")))
   (is (= "new" (:body (t/call "hot")))))
 
+(defn- check! [x]
+  (when-not x (throw (ex-info "kaboom" {:x x}))))
+
 (deftest a-throwing-handler-is-an-error
-  (w/handler! "boom" (fn [] (throw (ex-info "kaboom" {}))))
+  ;; Thrown from a nested call: the frontend gets the message, not the
+  ;; VM's "calling check! caused by ..." chain.
+  (w/handler! "boom" (fn [] (check! false)))
   (let [r (t/call "boom")]
     (is (not= 200 (:status r)))
-    (is (str/includes? (:body r) "kaboom"))))
+    (is (str/includes? (:body r) "kaboom"))
+    (is (not (str/includes? (:body r) "caused by")))))
 
 (deftest an-unknown-name-is-an-error
   (let [r (t/call "nope")]

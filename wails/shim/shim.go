@@ -26,6 +26,7 @@
 package shim
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -68,9 +69,33 @@ func (b *Bridge) Call(name string, args []any) (any, error) {
 	}
 	res, err := fn.Invoke(lgArgs)
 	if err != nil {
-		return nil, err
+		return nil, handlerError(err)
 	}
 	return ToGo(res), nil
+}
+
+// handlerError is what the frontend's rejected promise carries. A handler
+// that throws (ex-info "a task needs a title" {}) reaches Go wrapped in the
+// VM's call chain ("ExecutionError: calling title! caused by ..."); the
+// frontend wants the message the handler wrote, so unwrap to the thrown
+// value. Anything else - a Go error, a VM fault - keeps its full text.
+func handlerError(err error) error {
+	// The VM links its errors through GetCause, not Unwrap, so errors.As
+	// does not see the thrown value; walk the chain by hand.
+	for e := err; e != nil; {
+		if te, ok := e.(*vm.ThrownError); ok {
+			if ei, ok := te.Value.(*vm.ExInfo); ok {
+				return errors.New(ei.Message())
+			}
+			return errors.New(te.Value.String())
+		}
+		c, ok := e.(interface{ GetCause() error })
+		if !ok {
+			break
+		}
+		e = c.GetCause()
+	}
+	return err
 }
 
 // Register binds a let-go fn to a name the frontend can call.
