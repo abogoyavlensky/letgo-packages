@@ -5,6 +5,7 @@
 ;; bound Go method (see wails.shim), so there is no bindings-generation
 ;; step and no Go to write per handler.
 (ns wails.core
+  (:refer-clojure :exclude [run! close!])
   (:require [wails.shim :as shim]))
 
 (def bridge-method
@@ -23,10 +24,31 @@
   (shim/New opts))
 
 (defn new-window
-  "Open a window. opts keys (all optional): \"title\", \"width\",
-   \"height\", \"url\"."
+  "Open a window and return it. opts keys, keywords or strings, all
+   optional: :title, :width, :height, :min-width, :min-height, :url (the
+   path to load, default /), :hidden (create it hidden; show! it later)."
   [app opts]
   (shim/NewWindow app opts))
+
+;; Window controls. Wails moves each onto the main thread itself, so they
+;; are safe from any thread: a handler, a menu click, an nREPL eval.
+
+(defn set-title! "Set the window's title." [win title] (shim/SetTitle win title) nil)
+(defn show! "Show the window." [win] (shim/Show win) nil)
+(defn hide! "Hide the window." [win] (shim/Hide win) nil)
+(defn close! "Close the window." [win] (shim/Close win) nil)
+(defn focus! "Focus the window." [win] (shim/Focus win) nil)
+(defn reload! "Reload the window's page." [win] (shim/Reload win) nil)
+(defn exec-js! "Run JavaScript in the window's page." [win js] (shim/ExecJS win js) nil)
+
+(defn on-main!
+  "Run `f`, a fn of no args, on the main thread and wait for it. The window
+   fns above do this already; use it for anything else the platform
+   requires on the main thread. Returns nil; an exception `f` throws is
+   printed to stderr."
+  [f]
+  (shim/InvokeSync f)
+  nil)
 
 (defn handler!
   "Register `f` as the handler the frontend reaches by `name`. The
@@ -41,6 +63,79 @@
   "Send `data` to the frontend as the event `name`."
   [app name data]
   (shim/Emit app name data))
+
+(defn on-event!
+  "Call `f` with the event's data, as a let-go value, whenever the frontend
+   emits the event `name` (Events.Emit in @wailsio/runtime). `f` runs on a
+   Wails goroutine; an exception it throws is printed to stderr. Pass a var
+   (#'f) to make the listener pick up redefinitions. Returns a fn of no
+   args that removes the listener."
+  [app name f]
+  (shim/OnEvent app name f))
+
+(defn check-menu
+  "Build a menu from `spec` and throw it away: returns true, or throws on a
+   malformed spec, naming the offending item's path. For checking a spec in
+   a test without installing it. Needs the app (call new-app first)."
+  [spec]
+  (shim/CheckMenu spec))
+
+(defn set-menu!
+  "Build `spec` and install it as the application menu. The spec is data,
+   so calling this again (from the REPL, say) rebuilds the menu in place:
+
+     [{:role :app-menu}                  ; macOS application menu; put it first
+      {:label \"File\"
+       :items [{:label \"Export…\" :accelerator \"CmdOrCtrl+E\" :on-click #'export!}
+               {:separator true}
+               {:role :quit}]}
+      {:role :edit-menu}                 ; without it, Cmd+C/V do nothing on macOS
+      {:role :window-menu}]
+
+   An item is one of {:separator true}, {:role r}, or {:label s} with
+   either :items (a submenu) or :on-click (a fn of no args; pass a var to
+   make it hot) and an optional :accelerator. Roles: :app-menu :file-menu
+   :edit-menu :view-menu :window-menu :help-menu :quit :about
+   :close-window :reload. Keys may be keywords or strings. The menu it
+   replaces is destroyed."
+  [app spec]
+  (shim/SetMenu app spec)
+  nil)
+
+(defn open-file
+  "Ask for one file to open. Returns its path, or nil if the user cancels.
+   opts (optional): :title, :filters - [[\"JSON\" \"*.json\"] ...], the
+   pattern semicolon-separated. Call it from a handler or a menu click."
+  ([app] (open-file app {}))
+  ([app opts] (shim/OpenFile app opts)))
+
+(defn save-file
+  "Ask where to save. Returns the chosen path, or nil if the user cancels.
+   opts (optional): :title, :filename (the suggested name), :filters as
+   for open-file."
+  ([app] (save-file app {}))
+  ([app opts] (shim/SaveFile app opts)))
+
+(defn message!
+  "Show a message dialog. kind is :info, :warning or :error."
+  [app kind title body]
+  (shim/Message app (name kind) title body)
+  nil)
+
+(defn data-dir
+  "The per-user directory for the app called `app-name`, created if
+   missing: ~/Library/Application Support/<app-name> on macOS,
+   ~/.config/<app-name> on Linux. Returns the path."
+  [app-name]
+  (shim/DataDir app-name))
+
+(defn watch-assets!
+  "Dev only: reload `win` whenever a file under `dir` changes (polled every
+   300ms). Meant for `lgx run`, where the frontend is served from disk -
+   point it at the resource dir the app serves, e.g. \"resources/public\".
+   Returns a fn of no args that stops the watcher."
+  [win dir]
+  (shim/WatchAssets win dir))
 
 (defn run!
   "Block on the Wails event loop. Must be called from the main goroutine,

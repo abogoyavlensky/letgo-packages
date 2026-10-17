@@ -1,0 +1,62 @@
+;; The bridge: a frontend call reaching a let-go handler by name. Wails
+;; answers a string result as plain text and anything else as JSON.
+(ns wails.bridge-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(deftest map-arrives-as-an-object
+  (w/handler! "stats" (fn [] {:runtime "let-go" :items ["a" "b"]}))
+  (let [r (t/call "stats")]
+    (is (= 200 (:status r)))
+    (is (= {"runtime" "let-go" "items" ["a" "b"]} (:json r)))))
+
+(deftest args-arrive-as-let-go-values
+  (w/handler! "greet" (fn [n] (str "Hello, " n "!")))
+  (is (= "Hello, world!" (:body (t/call "greet" "world")))))
+
+(defn hot [] "old")
+
+(deftest a-var-handler-sees-redefinition
+  (w/handler! "hot" #'hot)
+  (is (= "old" (:body (t/call "hot"))))
+  (alter-var-root #'hot (constantly (fn [] "new")))
+  (is (= "new" (:body (t/call "hot")))))
+
+(defn- check! [x]
+  (when-not x (throw (ex-info "kaboom" {:x x}))))
+
+(deftest a-throwing-handler-is-an-error
+  ;; Thrown from a nested call: the frontend gets the message, not the
+  ;; VM's "calling check! caused by ..." chain.
+  (w/handler! "boom" (fn [] (check! false)))
+  (let [r (t/call "boom")]
+    (is (not= 200 (:status r)))
+    (is (str/includes? (:body r) "kaboom"))
+    (is (not (str/includes? (:body r) "caused by")))))
+
+(deftest an-unknown-name-is-an-error
+  (let [r (t/call "nope")]
+    (is (not= 200 (:status r)))
+    (is (str/includes? (:body r) "nope"))))
+
+(deftest numbers-arrive-as-ints-when-whole
+  (w/handler! "types" (fn [& xs] (mapv #(if (nil? %) "nil" (str (type %))) xs)))
+  (let [types (:json (t/call "types" 3 2.5 nil {"a" 1}))]
+    (is (= 4 (count types)))
+    (is (re-find #"Int" (nth types 0)))
+    (is (re-find #"Float" (nth types 1)))
+    (is (= "nil" (nth types 2)))))
+
+(deftest numbers-past-int64-stay-floats
+  (w/handler! "echo-type" (fn [x] (str (type x))))
+  (is (re-find #"Float" (:body (t/call "echo-type" 9.223372036854775808E18))))
+  (is (re-find #"Int" (:body (t/call "echo-type" -9.223372036854775808E18)))))
+
+(deftest empty-collections-stay-empty
+  ;; An empty vector's seq yields a nil element; it must not become [null].
+  (w/handler! "empties" (fn [] {:v [] :m {} :l '() :nested [[] {}]}))
+  (is (= {"v" [] "m" {} "l" [] "nested" [[] {}]} (:json (t/call "empties"))))
+  (w/handler! "empty-vec" (fn [] []))
+  (is (= [] (:json (t/call "empty-vec")))))
