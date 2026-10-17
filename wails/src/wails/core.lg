@@ -5,6 +5,7 @@
 ;; bound Go method (see wails.shim), so there is no bindings-generation
 ;; step and no Go to write per handler.
 (ns wails.core
+  (:refer-clojure :exclude [run!])
   (:require [wails.shim :as shim]))
 
 (def bridge-method

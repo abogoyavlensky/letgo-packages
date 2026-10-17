@@ -17,7 +17,7 @@
 
 (defn- start! []
   (os/setenv "WAILS_SERVER_PORT" (str port))
-  (let [app (w/new-app {:name "wails-test" :assets-dir "test/resources/public"})
+  (let [app (w/new-app {:name "wails-test" :assets "public"})
         win (w/new-window app {:title "test"})]
     (future (w/run! app))
     (loop [n 0]

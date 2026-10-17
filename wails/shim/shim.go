@@ -27,7 +27,6 @@ package shim
 
 import (
 	"fmt"
-	"net/http"
 	"sync"
 
 	"github.com/nooga/let-go/pkg/rt"
@@ -75,138 +74,26 @@ func (b *Bridge) Call(name string, args []any) (any, error) {
 	return ToGo(res), nil
 }
 
-// ToGo lowers a let-go value to something encoding/json can marshal.
-//
-// Unbox alone is not enough: a map and a vector both unbox to themselves.
-// A let-go map is a *vm.PersistentMap whose Seq yields vm.MapEntry, so a
-// type switch on vm.Map alone silently turns every map into a list of
-// pairs - JSON arrays where the frontend expects objects.
-func ToGo(v vm.Value) any {
-	if v == nil || v == vm.NIL {
-		return nil
-	}
-	switch t := v.(type) {
-	case vm.Keyword:
-		return string(t)
-	case vm.Symbol:
-		return string(t)
-	case vm.String:
-		return string(t)
-	}
-	if s, ok := v.(vm.Sequable); ok {
-		sq := s.Seq()
-		if sq != nil {
-			if _, isEntry := sq.First().(vm.MapEntry); isEntry {
-				out := map[string]any{}
-				for ; sq != nil; sq = sq.Next() {
-					e := sq.First().(vm.MapEntry)
-					out[keyString(e.Key)] = ToGo(e.Value)
-				}
-				return out
-			}
-		}
-		out := []any{}
-		for ; sq != nil; sq = sq.Next() {
-			out = append(out, ToGo(sq.First()))
-		}
-		return out
-	}
-	return v.Unbox()
-}
-
-// keyString renders a map key as the JSON object key. Keywords lose their
-// leading colon, which is what a JavaScript caller expects.
-func keyString(k vm.Value) string {
-	switch t := k.(type) {
-	case vm.Keyword:
-		return string(t)
-	case vm.String:
-		return string(t)
-	case vm.Symbol:
-		return string(t)
-	}
-	return fmt.Sprintf("%v", k.Unbox())
-}
-
-// asMap lowers a let-go map argument. A let-go map does not unbox to a Go
-// map[string]any - the reflect proxy rejects it with "reflect: Call using
-// *vm.PersistentMap as type map[string]interface {}" - so every shim entry
-// point taking options declares vm.Value and converts here.
-func asMap(v vm.Value) map[string]any {
-	if m, ok := ToGo(v).(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
-}
-
-func asInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case int64:
-		return int(n), true
-	case float64:
-		return int(n), true
-	}
-	return 0, false
-}
-
 // Register binds a let-go fn to a name the frontend can call.
 func Register(name string, fn vm.Fn) { handlers.Store(name, fn) }
 
-// New builds the application. Adding an Options field is one line here;
-// it is never a change to let-go.
-func New(optsVal vm.Value) *application.App {
-	opts := asMap(optsVal)
-	o := application.Options{
-		Services: []application.Service{application.NewService(&Bridge{})},
-	}
-	if s, ok := opts["name"].(string); ok {
-		o.Name = s
-	}
-	if s, ok := opts["description"].(string); ok {
-		o.Description = s
-	}
-	if s, ok := opts["assets-dir"].(string); ok && s != "" {
-		o.Assets = application.AssetOptions{Handler: http.FileServer(http.Dir(s))}
-	}
-	return application.New(o)
-}
-
 // NewWindow opens a window. Same reasoning as New.
-func NewWindow(app *application.App, optsVal vm.Value) *application.WebviewWindow {
-	opts := asMap(optsVal)
+func NewWindow(app *application.App, opts vm.Value) *application.WebviewWindow {
 	o := application.WebviewWindowOptions{}
-	if s, ok := opts["title"].(string); ok {
+	if s, ok := optString(opts, "title"); ok {
 		o.Title = s
 	}
-	if n, ok := asInt(opts["width"]); ok {
+	if n, ok := optInt(opts, "width"); ok {
 		o.Width = n
 	}
-	if n, ok := asInt(opts["height"]); ok {
+	if n, ok := optInt(opts, "height"); ok {
 		o.Height = n
 	}
-	if s, ok := opts["url"].(string); ok {
+	if s, ok := optString(opts, "url"); ok {
 		o.URL = s
 	}
 	return app.Window.NewWithOptions(o)
 }
-
-// Emit sends an event to the frontend. data is lowered the same way a
-// handler's return value is.
-func Emit(app *application.App, name string, data vm.Value) bool {
-	return app.Event.Emit(name, ToGo(data))
-}
-
-// Run blocks on the Wails event loop.
-//
-// It must be reached from let-go code running on the main goroutine:
-// application's init() calls runtime.LockOSThread(), which pins main to
-// the main OS thread, and the platform layers require it.
-func Run(app *application.App) error { return app.Run() }
-
-// Quit stops the application.
-func Quit(app *application.App) { app.Quit() }
 
 // init registers the namespace directly rather than through
 // rt.RegisterInstaller - the same reason the -out-pkg output does. pkg/rt

@@ -1,0 +1,41 @@
+;; The frontend served from resources (:assets "public"), the way a built
+;; binary serves its embedded copy.
+(ns wails.assets-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(defn- get [path]
+  (t/app)
+  (http/get (t/url path)))
+
+(defn- header [res k]
+  (some (fn [[hk hv]] (when (= (str/lower-case (str hk)) k) (str hv)))
+        (:headers res)))
+
+(deftest root-serves-index-html
+  (let [r (get "/")]
+    (is (= 200 (:status r)))
+    (is (str/includes? (:body r) "wails test fixture"))
+    (is (str/starts-with? (header r "content-type") "text/html"))))
+
+(deftest files-get-their-mime-type
+  (let [r (get "/app.js")]
+    (is (= 200 (:status r)))
+    (is (str/includes? (header r "content-type") "javascript"))))
+
+(deftest a-missing-file-is-404
+  (is (= 404 (:status (get "/nope.js")))))
+
+(deftest no-escape-from-the-prefix
+  ;; test/resources/secret.txt is a resource, but outside the prefix.
+  (is (some? (io/resource "secret.txt")))
+  (is (= 404 (:status (get "/../secret.txt"))))
+  (is (= 404 (:status (get "/%2e%2e/secret.txt"))))
+  (is (= 404 (:status (get "/..%2fsecret.txt"))))
+  (is (= 404 (:status (get "/..%2f..%2flgx.edn")))))
+
+(deftest assets-and-assets-dir-conflict
+  (is (try (w/new-app {:assets "public" :assets-dir "x"}) false
+           (catch e (str/includes? (ex-message e) "not both")))))
