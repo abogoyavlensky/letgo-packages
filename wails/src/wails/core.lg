@@ -5,7 +5,7 @@
 ;; bound Go method (see wails.shim), so there is no bindings-generation
 ;; step and no Go to write per handler.
 (ns wails.core
-  (:refer-clojure :exclude [run!])
+  (:refer-clojure :exclude [run! close!])
   (:require [wails.shim :as shim]))
 
 (def bridge-method
@@ -72,6 +72,34 @@
    args that removes the listener."
   [app name f]
   (shim/OnEvent app name f))
+
+(defn build-menu
+  "Build a menu from `spec` without installing it, and return it. Throws
+   on a malformed spec, naming the offending item's path. set-menu! calls
+   this; it is public so a spec can be checked in a test, with no window."
+  [spec]
+  (shim/BuildMenu spec))
+
+(defn set-menu!
+  "Build `spec` and install it as the application menu. The spec is data,
+   so calling this again (from the REPL, say) rebuilds the menu in place:
+
+     [{:role :app-menu}                  ; macOS application menu; put it first
+      {:label \"File\"
+       :items [{:label \"Export…\" :accelerator \"CmdOrCtrl+E\" :on-click #'export!}
+               {:separator true}
+               {:role :quit}]}
+      {:role :edit-menu}                 ; without it, Cmd+C/V do nothing on macOS
+      {:role :window-menu}]
+
+   An item is one of {:separator true}, {:role r}, or {:label s} with
+   either :items (a submenu) or :on-click (a fn of no args; pass a var to
+   make it hot) and an optional :accelerator. Roles: :app-menu :file-menu
+   :edit-menu :view-menu :window-menu :help-menu :quit :about
+   :close-window :reload. Keys may be keywords or strings."
+  [app spec]
+  (shim/SetMenu app spec)
+  nil)
 
 (defn run!
   "Block on the Wails event loop. Must be called from the main goroutine,

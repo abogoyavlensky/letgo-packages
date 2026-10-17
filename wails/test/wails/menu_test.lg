@@ -1,0 +1,49 @@
+;; The data-driven application menu. Server mode installs menus as a no-op,
+;; so the spec is checked through build-menu.
+(ns wails.menu-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(defn export! [] nil)
+
+(def spec
+  [{:role :app-menu}
+   {:label "File"
+    :items [{:label "Export…" :accelerator "CmdOrCtrl+E" :on-click #'export!}
+            {:separator true}
+            {:label "More" :items [{"label" "Deep" "on-click" (fn [] nil)}]}
+            {:role :quit}]}
+   {:role :edit-menu}
+   {:role "window-menu"}])
+
+(defn- error-of [spec]
+  (try (w/build-menu spec) nil (catch e (ex-message e))))
+
+(deftest a-valid-spec-builds
+  (is (some? (w/build-menu spec)))
+  (is (some? (w/build-menu []))))
+
+(deftest set-menu-installs-it
+  (is (nil? (w/set-menu! (t/app) spec))))
+
+(deftest an-unknown-role-names-its-path
+  (let [msg (error-of [{:label "File" :items [{:label "ok"} {:role :nope}]}])]
+    (is (str/includes? msg "[0 :items 1 :role]"))
+    (is (str/includes? msg ":nope"))))
+
+(deftest an-item-without-label-role-or-separator
+  (is (str/includes? (error-of [{:accelerator "x"}]) "[0]: needs :label")))
+
+(deftest on-click-must-be-callable
+  (is (str/includes? (error-of [{:label "x" :on-click 42}]) "[0 :on-click]")))
+
+(deftest the-spec-must-be-a-vector-of-maps
+  (is (str/includes? (error-of {:label "x"}) "got a map"))
+  (is (str/includes? (error-of ["x"]) "[0]: must be a map")))
+
+(deftest set-menu-throws-on-a-bad-spec
+  (is (str/includes? (try (w/set-menu! (t/app) [{:role :nope}]) ""
+                          (catch e (ex-message e)))
+                     ":nope")))
