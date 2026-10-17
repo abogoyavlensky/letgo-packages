@@ -1,0 +1,51 @@
+;; Tests for nrepl.core: a real server, driven over TCP by a tiny python
+;; client (test/nrepl/client.py). Run with: lgx test  (from nrepl/)
+
+(ns nrepl.core-test
+  (:require [nrepl.core :as nrepl]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(defn- eval-remote
+  "Evaluate code on the running server. Returns {:exit :value :err}."
+  [code]
+  (let [r (os/sh "python3" "test/nrepl/client.py" (str (nrepl/port)) code)]
+    {:exit (:exit r) :value (str/trim (:out r)) :err (:err r)}))
+
+(defn- threw? [f]
+  (try (f) false (catch e true)))
+
+(defn- with-server [f]
+  (try
+    (nrepl/start!)
+    (f)
+    (finally
+      (nrepl/stop!))))
+
+(deftest start-binds-a-free-port
+  (with-server
+    (fn []
+      (is (pos? (nrepl/port)))
+      (is (= (str (nrepl/port)) (str/trim (slurp ".nrepl-port"))))
+      (is (threw? #(nrepl/start!))))))
+
+(deftest stop-clears-the-port
+  (nrepl/start!)
+  (nrepl/stop!)
+  (is (nil? (nrepl/port)))
+  (is (nil? (os/stat ".nrepl-port")))
+  (is (nil? (nrepl/stop!))))
+
+(deftest evaluates-over-tcp
+  (with-server
+    (fn []
+      (is (= {:exit 0 :value "3"} (dissoc (eval-remote "(+ 1 2)") :err)))
+      (let [r (eval-remote "(throw (ex-info \"boom\" {}))")]
+        (is (= 1 (:exit r)))
+        (is (str/includes? (:err r) "boom"))))))
+
+(deftest shares-the-process
+  (with-server
+    (fn []
+      (is (= 0 (:exit (eval-remote "(intern 'nrepl.core-test 'probe 42)"))))
+      (is (= 42 @(resolve 'nrepl.core-test/probe))))))

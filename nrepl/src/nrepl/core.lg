@@ -1,0 +1,40 @@
+;; nrepl.core - an nREPL server inside the running program.
+;;
+;; `lg -n` starts its server only after the script returns, so a program
+;; that blocks forever (a Wails event loop, an http/serve process) never
+;; gets one. start! serves nREPL from inside the process instead: every var
+;; the program defined is visible, and redefining one changes the live
+;; program. See nrepl.shim for how.
+(ns nrepl.core
+  (:require [nrepl.shim :as shim]))
+
+(defn start!
+  "Serve nREPL on 127.0.0.1 and return the bound port. opts (optional):
+
+     :port  port to bind; 0, the default, lets the OS pick a free one
+
+   Also writes .nrepl-port in the working directory, where editors look
+   for it. Evaluation runs in the process's current namespace; (in-ns 'x)
+   switches it as in any REPL. One server per process: calling start!
+   while one runs throws.
+
+   This is a dev tool. Gate it, e.g. on LGX_RUN, which `lgx run` sets and
+   a built binary does not:
+
+     (when (os/getenv \"LGX_RUN\") (nrepl/start!))"
+  ([] (start! {}))
+  ([{:keys [port] :or {port 0}}]
+   (shim/Start port)))
+
+(defn stop!
+  "Stop the server and remove .nrepl-port. Live client connections end
+   when their clients disconnect. A no-op when no server is running."
+  []
+  (shim/Stop)
+  nil)
+
+(defn port
+  "The running server's port, or nil when none is running."
+  []
+  (let [p (shim/Port)]
+    (when (pos? p) p)))
