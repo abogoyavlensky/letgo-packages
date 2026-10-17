@@ -25,6 +25,14 @@ func ToGo(v vm.Value) any {
 	case vm.String:
 		return string(t)
 	}
+	// An empty collection's seq is not nil: it yields one nil element, so
+	// [] would arrive as [null]. Settle emptiness first.
+	if c, ok := v.(vm.Counted); ok && c.RawCount() == 0 {
+		if isMap(v) {
+			return map[string]any{}
+		}
+		return []any{}
+	}
 	if s, ok := v.(vm.Sequable); ok {
 		sq := s.Seq()
 		if sq != nil {
@@ -158,4 +166,31 @@ func FromJSON(v any) (vm.Value, error) {
 		return m.(vm.Value), nil
 	}
 	return vm.ToLetGo(v)
+}
+
+// isMap is true for a let-go map, including an empty one. vm.Lookup alone
+// would admit strings and vectors, and a map's seq yields entries.
+func isMap(v vm.Value) bool {
+	if _, ok := v.(vm.Lookup); !ok {
+		return false
+	}
+	switch v.(type) {
+	case vm.String, vm.Indexed:
+		return false
+	}
+	if c, ok := v.(vm.Counted); ok && c.RawCount() == 0 {
+		// Empty: only a map is associative without being indexed.
+		_, assoc := v.(vm.Associative)
+		return assoc
+	}
+	sq, ok := v.(vm.Sequable)
+	if !ok {
+		return false
+	}
+	s := sq.Seq()
+	if s == nil {
+		return true
+	}
+	_, isEntry := s.First().(vm.MapEntry)
+	return isEntry
 }

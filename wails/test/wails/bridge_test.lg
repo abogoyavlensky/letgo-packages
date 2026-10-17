@@ -47,3 +47,10 @@
   (w/handler! "echo-type" (fn [x] (str (type x))))
   (is (re-find #"Float" (:body (t/call "echo-type" 9.223372036854775808E18))))
   (is (re-find #"Int" (:body (t/call "echo-type" -9.223372036854775808E18)))))
+
+(deftest empty-collections-stay-empty
+  ;; An empty vector's seq yields a nil element; it must not become [null].
+  (w/handler! "empties" (fn [] {:v [] :m {} :l '() :nested [[] {}]}))
+  (is (= {"v" [] "m" {} "l" [] "nested" [[] {}]} (:json (t/call "empties"))))
+  (w/handler! "empty-vec" (fn [] []))
+  (is (= [] (:json (t/call "empty-vec")))))

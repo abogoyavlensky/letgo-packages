@@ -164,31 +164,6 @@ func addItem(m *application.Menu, item vm.Value, path []string) error {
 	return nil
 }
 
-// isMap is true for a let-go map, including an empty one. vm.Lookup alone
-// would admit strings and vectors, and a map's seq yields entries.
-func isMap(v vm.Value) bool {
-	if _, ok := v.(vm.Lookup); !ok {
-		return false
-	}
-	switch v.(type) {
-	case vm.String, vm.Indexed:
-		return false
-	}
-	if c, ok := v.(vm.Counted); ok && c.RawCount() == 0 {
-		return true
-	}
-	sq, ok := v.(vm.Sequable)
-	if !ok {
-		return false
-	}
-	s := sq.Seq()
-	if s == nil {
-		return true
-	}
-	_, isEntry := s.First().(vm.MapEntry)
-	return isEntry
-}
-
 func menuError(path []string, msg string) error {
 	return fmt.Errorf("menu spec [%s]: %s", strings.Join(path, " "), msg)
 }
