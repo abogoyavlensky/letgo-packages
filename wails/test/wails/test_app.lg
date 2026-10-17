@@ -34,6 +34,17 @@
 
 (def ^:private call-id (atom 0))
 
+(defn- runtime-post [payload]
+  (http/post (url "/wails/runtime") (json/write-json payload)
+             {:content-type "application/json"
+              :headers {"x-wails-client-id" "tests"}}))
+
+(defn emit-from-frontend
+  "Emit the event `name` the way the frontend's Events.Emit does."
+  [name data]
+  @started
+  (runtime-post {:object 3 :method 0 :args {:name name :data data}}))
+
 (defn call
   "Call the let-go handler `name` the way the frontend does, through the
    one bound Go method. Returns {:status :body :json}; :json is the decoded
@@ -44,9 +55,7 @@
                  :args {:call-id (str "t" (swap! call-id inc))
                         :methodName w/bridge-method
                         :args [name (vec args)]}}
-        res (http/post (url "/wails/runtime") (json/write-json payload)
-                       {:content-type "application/json"
-                        :headers {"x-wails-client-id" "tests"}})
+        res (runtime-post payload)
         body (:body res)]
     {:status (:status res)
      :body body

@@ -2,7 +2,9 @@ package shim
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/nooga/let-go/pkg/vm"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -56,3 +58,18 @@ func Run(app *application.App) error { return app.Run() }
 
 // Quit stops the application.
 func Quit(app *application.App) { app.Quit() }
+
+// OnEvent calls fn with the event's data, as a let-go value, whenever the
+// frontend emits name (Events.Emit in @wailsio/runtime). Wails dispatches
+// listeners on its own goroutines, so fn runs off the main thread. It
+// returns a fn of no args that removes the listener.
+func OnEvent(app *application.App, name string, fn vm.Fn) func() {
+	return app.Event.On(name, func(e *application.CustomEvent) {
+		data, err := FromJSON(e.Data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wails: event %q: %v\n", name, err)
+			return
+		}
+		callback("event "+name, fn, data)
+	})
+}

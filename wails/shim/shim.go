@@ -61,7 +61,7 @@ func (b *Bridge) Call(name string, args []any) (any, error) {
 	}
 	lgArgs := make([]vm.Value, len(args))
 	for i, a := range args {
-		val, err := vm.ToLetGo(a)
+		val, err := FromJSON(a)
 		if err != nil {
 			return nil, fmt.Errorf("arg %d of %q: %w", i, name, err)
 		}
@@ -109,5 +109,6 @@ func init() {
 	ns.Def("Emit", vm.MustBox(Emit))
 	ns.Def("Run", vm.MustBox(Run))
 	ns.Def("Quit", vm.MustBox(Quit))
+	ns.Def("OnEvent", vm.MustBox(OnEvent))
 	rt.RegisterNS(ns)
 }

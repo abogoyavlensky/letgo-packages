@@ -43,6 +43,15 @@
   [app name data]
   (shim/Emit app name data))
 
+(defn on-event!
+  "Call `f` with the event's data, as a let-go value, whenever the frontend
+   emits the event `name` (Events.Emit in @wailsio/runtime). `f` runs on a
+   Wails goroutine; an exception it throws is printed to stderr. Pass a var
+   (#'f) to make the listener pick up redefinitions. Returns a fn of no
+   args that removes the listener."
+  [app name f]
+  (shim/OnEvent app name f))
+
 (defn run!
   "Block on the Wails event loop. Must be called from the main goroutine,
    so call it from the top of your entry fn, not from a spawned thread.

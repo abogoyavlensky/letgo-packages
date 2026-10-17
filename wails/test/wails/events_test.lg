@@ -1,0 +1,32 @@
+;; Events from the frontend reaching a let-go listener.
+(ns wails.events-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [clojure.test :refer [deftest is]]))
+
+(def ^:private got (atom nil))
+
+(defn listener [data] (deliver @got [:v1 data]))
+
+(deftest a-frontend-event-reaches-a-var-listener
+  (reset! got (promise))
+  (let [off (w/on-event! (t/app) "ping" #'listener)]
+    (t/emit-from-frontend "ping" {:n 1 :tags ["a"]})
+    (is (= [:v1 {"n" 1 "tags" ["a"]}] (deref @got 3000 :timeout)))
+    ;; Redefining the var changes the live listener.
+    (alter-var-root #'listener (constantly (fn [data] (deliver @got [:v2 data]))))
+    (reset! got (promise))
+    (t/emit-from-frontend "ping" "again")
+    (is (= [:v2 "again"] (deref @got 3000 :timeout)))
+    ;; The returned fn removes it.
+    (off)
+    (reset! got (promise))
+    (t/emit-from-frontend "ping" "gone")
+    (is (= :timeout (deref @got 300 :timeout)))))
+
+(deftest a-throwing-listener-does-not-kill-the-app
+  (w/on-event! (t/app) "explode" (fn [_] (throw (ex-info "listener boom" {}))))
+  (t/emit-from-frontend "explode" nil)
+  (sleep 200)
+  (w/handler! "alive" (fn [] "yes"))
+  (is (= "yes" (:body (t/call "alive")))))

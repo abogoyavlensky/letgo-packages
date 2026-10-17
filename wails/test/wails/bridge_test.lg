@@ -34,3 +34,11 @@
   (let [r (t/call "nope")]
     (is (not= 200 (:status r)))
     (is (str/includes? (:body r) "nope"))))
+
+(deftest numbers-arrive-as-ints-when-whole
+  (w/handler! "types" (fn [& xs] (mapv #(if (nil? %) "nil" (str (type %))) xs)))
+  (let [types (:json (t/call "types" 3 2.5 nil {"a" 1}))]
+    (is (= 4 (count types)))
+    (is (re-find #"Int" (nth types 0)))
+    (is (re-find #"Float" (nth types 1)))
+    (is (= "nil" (nth types 2)))))

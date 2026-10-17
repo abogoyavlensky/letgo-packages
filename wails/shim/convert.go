@@ -2,6 +2,7 @@ package shim
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/nooga/let-go/pkg/vm"
 )
@@ -114,4 +115,45 @@ func asInt(v any) (int, bool) {
 		return int(n), true
 	}
 	return 0, false
+}
+
+// FromJSON raises a JSON-decoded Go value - what Wails hands over for a
+// call's arguments and an event's data - to a let-go value.
+//
+// vm.ToLetGo would do most of it, but JSON has one number type and Go
+// decodes it as float64, so an id of 3 would arrive as 3.0. A float with
+// no fractional part that fits an int64 becomes an Int; anything else
+// stays a Float. Objects become maps with string keys, arrays vectors, and
+// null nil (which vm.ToLetGo cannot box at all).
+func FromJSON(v any) (vm.Value, error) {
+	switch t := v.(type) {
+	case nil:
+		return vm.NIL, nil
+	case float64:
+		if t == math.Trunc(t) && t >= math.MinInt64 && t <= math.MaxInt64 {
+			return vm.Int(int64(t)), nil
+		}
+		return vm.Float(t), nil
+	case []any:
+		out := make([]vm.Value, len(t))
+		for i, e := range t {
+			lv, err := FromJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = lv
+		}
+		return vm.NewPersistentVector(out), nil
+	case map[string]any:
+		var m vm.Associative = vm.EmptyPersistentMap
+		for k, e := range t {
+			lv, err := FromJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			m = m.Assoc(vm.String(k), lv)
+		}
+		return m.(vm.Value), nil
+	}
+	return vm.ToLetGo(v)
 }

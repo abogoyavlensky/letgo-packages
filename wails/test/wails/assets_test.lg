@@ -6,7 +6,7 @@
             [string :as str]
             [clojure.test :refer [deftest is]]))
 
-(defn- get [path]
+(defn- fetch [path]
   (t/app)
   (http/get (t/url path)))
 
@@ -15,27 +15,32 @@
         (:headers res)))
 
 (deftest root-serves-index-html
-  (let [r (get "/")]
+  (let [r (fetch "/")]
     (is (= 200 (:status r)))
     (is (str/includes? (:body r) "wails test fixture"))
     (is (str/starts-with? (header r "content-type") "text/html"))))
 
 (deftest files-get-their-mime-type
-  (let [r (get "/app.js")]
+  (let [r (fetch "/app.js")]
     (is (= 200 (:status r)))
     (is (str/includes? (header r "content-type") "javascript"))))
 
 (deftest a-missing-file-is-404
-  (is (= 404 (:status (get "/nope.js")))))
+  (is (= 404 (:status (fetch "/nope.js")))))
 
 (deftest no-escape-from-the-prefix
   ;; test/resources/secret.txt is a resource, but outside the prefix.
   (is (some? (io/resource "secret.txt")))
-  (is (= 404 (:status (get "/../secret.txt"))))
-  (is (= 404 (:status (get "/%2e%2e/secret.txt"))))
-  (is (= 404 (:status (get "/..%2fsecret.txt"))))
-  (is (= 404 (:status (get "/..%2f..%2flgx.edn")))))
+  (is (= 404 (:status (fetch "/../secret.txt"))))
+  (is (= 404 (:status (fetch "/%2e%2e/secret.txt"))))
+  (is (= 404 (:status (fetch "/..%2fsecret.txt"))))
+  (is (= 404 (:status (fetch "/..%2f..%2flgx.edn")))))
 
 (deftest assets-and-assets-dir-conflict
   (is (try (w/new-app {:assets "public" :assets-dir "x"}) false
            (catch e (str/includes? (ex-message e) "not both")))))
+
+(deftest an-empty-file-is-a-200
+  (let [r (fetch "/empty.css")]
+    (is (= 200 (:status r)))
+    (is (= "" (:body r)))))
