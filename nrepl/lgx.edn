@@ -1,0 +1,12 @@
+{:paths ["src"]
+
+ ;; For this package's own `lgx test`. A consumer's runtime decision is its
+ ;; own: lgx ignores a dep's top-level keys.
+ :lg-runtime :built
+ :lg-version "1.13.0"
+
+ :deps {;; The hand-written seam, and the only Go in the package. It ships
+        ;; inside the nrepl-vX.Y.Z package tag as a local module: there is no
+        ;; separate Go module tag. lgx 0.4.2 or newer reuses the built runtime
+        ;; until the shim's files change.
+        github.com/abogoyavlensky/letgo-packages/nrepl/shim {:go/local "shim"}}}
