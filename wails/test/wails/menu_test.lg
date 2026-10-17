@@ -1,5 +1,5 @@
 ;; The data-driven application menu. Server mode installs menus as a no-op,
-;; so the spec is checked through build-menu.
+;; so the spec is checked through check-menu.
 (ns wails.menu-test
   (:require [wails.core :as w]
             [wails.test-app :as t]
@@ -19,11 +19,22 @@
    {:role "window-menu"}])
 
 (defn- error-of [spec]
-  (try (w/build-menu spec) nil (catch e (ex-message e))))
+  (t/app)
+  (try (w/check-menu spec) nil (catch e (ex-message e))))
 
 (deftest a-valid-spec-builds
-  (is (some? (w/build-menu spec)))
-  (is (some? (w/build-menu []))))
+  (t/app)
+  (is (true? (w/check-menu spec)))
+  (is (true? (w/check-menu []))))
+
+(deftest a-bad-accelerator-names-its-path
+  (let [msg (error-of [{:label "File" :items [{:label "x" :accelerator "Bogus+E"}]}])]
+    (is (str/includes? msg "[0 :items 0 :accelerator]"))
+    (is (str/includes? msg "Bogus+E"))))
+
+(deftest rebuilding-the-menu-repeatedly-works
+  (dotimes [_ 5] (w/set-menu! (t/app) spec))
+  (is (nil? (w/set-menu! (t/app) spec))))
 
 (deftest set-menu-installs-it
   (is (nil? (w/set-menu! (t/app) spec))))

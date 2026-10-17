@@ -1,8 +1,10 @@
 package shim
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/nooga/let-go/pkg/vm"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -36,27 +38,61 @@ var menuRoles = map[string]application.Role{
 	"reload":       application.Reload,
 }
 
-// BuildMenu builds a Wails menu from a spec. An error names the path of
+// buildMenu builds a Wails menu from a spec. An error names the path of
 // the offending item, e.g. `[1 :items 0 :role]`, so a typo in a nested
 // submenu is findable.
-func BuildMenu(spec vm.Value) (*application.Menu, error) {
+//
+// Wails registers every item it creates in a process-global map until the
+// item is destroyed, so a build that fails part-way destroys what it made.
+// It also needs the application: some roles and the accelerator check
+// reach Wails' global app, which is nil before new-app.
+func buildMenu(spec vm.Value) (*application.Menu, error) {
+	if application.Get() == nil {
+		return nil, errors.New("menus need the application: call new-app first")
+	}
 	m := application.NewMenu()
 	if err := addItems(m, spec, nil); err != nil {
+		m.Destroy()
 		return nil, err
 	}
 	return m, nil
 }
 
-// SetMenu builds spec and installs it as the application menu. It
-// returns (bool, error) rather than a bare error: let-go throws on the
-// error of a (value, error) pair but hands a lone error back as a value,
-// which would let a bad spec pass silently.
-func SetMenu(app *application.App, spec vm.Value) (bool, error) {
-	m, err := BuildMenu(spec)
+// CheckMenu builds spec and throws it away, so a spec can be validated -
+// in a test, say - without installing it.
+//
+// Every fn here that can fail returns (bool, error) rather than a bare
+// error: let-go throws on the error of a (value, error) pair but hands a
+// lone error back as a value, which would let a bad spec pass silently.
+func CheckMenu(spec vm.Value) (bool, error) {
+	m, err := buildMenu(spec)
 	if err != nil {
 		return false, err
 	}
+	m.Destroy()
+	return true, nil
+}
+
+var (
+	menuMu      sync.Mutex
+	currentMenu *application.Menu
+)
+
+// SetMenu builds spec and installs it as the application menu. The menu it
+// replaces is destroyed, so rebuilding from the REPL again and again does
+// not pile up items and the callbacks they hold.
+func SetMenu(app *application.App, spec vm.Value) (bool, error) {
+	m, err := buildMenu(spec)
+	if err != nil {
+		return false, err
+	}
+	menuMu.Lock()
+	defer menuMu.Unlock()
 	app.Menu.Set(m)
+	if currentMenu != nil {
+		currentMenu.Destroy()
+	}
+	currentMenu = m
 	return true, nil
 }
 
@@ -112,7 +148,11 @@ func addItem(m *application.Menu, item vm.Value, path []string) error {
 		if !ok {
 			return menuError(at(path, ":accelerator"), "must be a string")
 		}
-		mi.SetAccelerator(s)
+		// Wails logs a malformed shortcut and leaves the item without one;
+		// reading it back is how to tell, without copying its parser.
+		if mi.SetAccelerator(s).GetAccelerator() == "" {
+			return menuError(at(path, ":accelerator"), fmt.Sprintf("%q is not a valid accelerator", s))
+		}
 	}
 	fn, err := optFn(item, "on-click")
 	if err != nil {

@@ -73,12 +73,12 @@
   [app name f]
   (shim/OnEvent app name f))
 
-(defn build-menu
-  "Build a menu from `spec` without installing it, and return it. Throws
-   on a malformed spec, naming the offending item's path. set-menu! calls
-   this; it is public so a spec can be checked in a test, with no window."
+(defn check-menu
+  "Build a menu from `spec` and throw it away: returns true, or throws on a
+   malformed spec, naming the offending item's path. For checking a spec in
+   a test without installing it. Needs the app (call new-app first)."
   [spec]
-  (shim/BuildMenu spec))
+  (shim/CheckMenu spec))
 
 (defn set-menu!
   "Build `spec` and install it as the application menu. The spec is data,
@@ -96,7 +96,8 @@
    either :items (a submenu) or :on-click (a fn of no args; pass a var to
    make it hot) and an optional :accelerator. Roles: :app-menu :file-menu
    :edit-menu :view-menu :window-menu :help-menu :quit :about
-   :close-window :reload. Keys may be keywords or strings."
+   :close-window :reload. Keys may be keywords or strings. The menu it
+   replaces is destroyed."
   [app spec]
   (shim/SetMenu app spec)
   nil)

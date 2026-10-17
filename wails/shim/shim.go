@@ -99,7 +99,7 @@ func init() {
 	ns.Def("Reload", vm.MustBox(Reload))
 	ns.Def("ExecJS", vm.MustBox(ExecJS))
 	ns.Def("InvokeSync", vm.MustBox(InvokeSync))
-	ns.Def("BuildMenu", vm.MustBox(BuildMenu))
+	ns.Def("CheckMenu", vm.MustBox(CheckMenu))
 	ns.Def("SetMenu", vm.MustBox(SetMenu))
 	rt.RegisterNS(ns)
 }
