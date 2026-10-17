@@ -101,5 +101,10 @@ func init() {
 	ns.Def("InvokeSync", vm.MustBox(InvokeSync))
 	ns.Def("CheckMenu", vm.MustBox(CheckMenu))
 	ns.Def("SetMenu", vm.MustBox(SetMenu))
+	ns.Def("OpenFile", vm.MustBox(OpenFile))
+	ns.Def("SaveFile", vm.MustBox(SaveFile))
+	ns.Def("Message", vm.MustBox(Message))
+	ns.Def("DataDir", vm.MustBox(DataDir))
+	ns.Def("WatchAssets", vm.MustBox(WatchAssets))
 	rt.RegisterNS(ns)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/nooga/let-go/pkg/vm"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -72,4 +73,22 @@ func OnEvent(app *application.App, name string, fn vm.Fn) func() {
 		}
 		callback("event "+name, fn, data)
 	})
+}
+
+// DataDir returns the per-user directory for an app's data -
+// os.UserConfigDir()/name, e.g. ~/Library/Application Support/<name> on
+// macOS and ~/.config/<name> on Linux - creating it if needed.
+func DataDir(name string) (string, error) {
+	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		return "", fmt.Errorf("data-dir name must be a plain directory name, got %q", name)
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
 }

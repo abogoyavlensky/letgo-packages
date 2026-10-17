@@ -102,6 +102,41 @@
   (shim/SetMenu app spec)
   nil)
 
+(defn open-file
+  "Ask for one file to open. Returns its path, or nil if the user cancels.
+   opts (optional): :title, :filters - [[\"JSON\" \"*.json\"] ...], the
+   pattern semicolon-separated. Call it from a handler or a menu click."
+  ([app] (open-file app {}))
+  ([app opts] (shim/OpenFile app opts)))
+
+(defn save-file
+  "Ask where to save. Returns the chosen path, or nil if the user cancels.
+   opts (optional): :title, :filename (the suggested name), :filters as
+   for open-file."
+  ([app] (save-file app {}))
+  ([app opts] (shim/SaveFile app opts)))
+
+(defn message!
+  "Show a message dialog. kind is :info, :warning or :error."
+  [app kind title body]
+  (shim/Message app (name kind) title body)
+  nil)
+
+(defn data-dir
+  "The per-user directory for the app called `app-name`, created if
+   missing: ~/Library/Application Support/<app-name> on macOS,
+   ~/.config/<app-name> on Linux. Returns the path."
+  [app-name]
+  (shim/DataDir app-name))
+
+(defn watch-assets!
+  "Dev only: reload `win` whenever a file under `dir` changes (polled every
+   300ms). Meant for `lgx run`, where the frontend is served from disk -
+   point it at the resource dir the app serves, e.g. \"resources/public\".
+   Returns a fn of no args that stops the watcher."
+  [win dir]
+  (shim/WatchAssets win dir))
+
 (defn run!
   "Block on the Wails event loop. Must be called from the main goroutine,
    so call it from the top of your entry fn, not from a spawned thread.

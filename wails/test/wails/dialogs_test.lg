@@ -1,0 +1,45 @@
+;; Dialogs, the data dir and the asset watcher. Server mode has no native
+;; dialogs: Wails answers a file dialog with an error, which proves the
+;; error path reaches let-go as an exception.
+(ns wails.dialogs-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(defn- message-of [f]
+  (try (f) nil (catch e (ex-message e))))
+
+(deftest file-dialogs-throw-in-server-mode
+  (is (str/includes? (message-of #(w/open-file (t/app) {:title "Open"
+                                                        :filters [["JSON" "*.json"]]}))
+                     "not available in server mode"))
+  (is (str/includes? (message-of #(w/save-file (t/app) {:filename "x.json"}))
+                     "not available in server mode")))
+
+(deftest bad-filters-are-rejected
+  (is (str/includes? (message-of #(w/open-file (t/app) {:filters [["JSON"]]}))
+                     "pair")))
+
+(deftest message-kinds
+  (is (nil? (w/message! (t/app) :info "Title" "Body")))
+  (is (str/includes? (message-of #(w/message! (t/app) :shout "T" "B")) ":info")))
+
+(deftest data-dir-is-created-under-the-config-dir
+  (let [base (str (os/temp-dir) "/wails-test-config-" (rand-int 100000000))]
+    (os/setenv "XDG_CONFIG_HOME" base)
+    (let [dir (w/data-dir "lgx-wails-test")]
+      (is (= (str base "/lgx-wails-test") dir))
+      (is (:dir? (os/stat dir))))
+    (is (some? (message-of #(w/data-dir "../escape"))))
+    (os/sh "rm" "-rf" base)))
+
+(deftest watch-assets-returns-a-stop-fn
+  (let [stop (w/watch-assets! (t/win) "test/resources/public")]
+    (is (fn? stop))
+    (spit "test/resources/public/touched.txt" "x")
+    (sleep 700)
+    (stop)
+    (stop)
+    (os/sh "rm" "-f" "test/resources/public/touched.txt"))
+  (is (some? (message-of #(w/watch-assets! (t/win) "no/such/dir")))))
