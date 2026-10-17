@@ -12,9 +12,13 @@ restart.
 ```
 
 ```clojure
-(require '[nrepl.core :as nrepl])
+(require '[nrepl.core :as nrepl]
+         '[string :as str])
 
-(when (os/getenv "LGX_RUN")   ; set by `lgx run`, absent in a built binary
+;; LGX_RUN is set by `lgx run` and absent in a built binary. Check for a
+;; non-blank value: os/getenv returns "" for an unset variable, and "" is
+;; truthy, so a bare (when (os/getenv "LGX_RUN") ...) is always on.
+(when-not (str/blank? (os/getenv "LGX_RUN"))
   (nrepl/start!))             ; => the bound port; also writes .nrepl-port
 ```
 

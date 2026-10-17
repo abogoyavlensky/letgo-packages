@@ -19,9 +19,10 @@
    while one runs throws.
 
    This is a dev tool. Gate it, e.g. on LGX_RUN, which `lgx run` sets and
-   a built binary does not:
+   a built binary does not. os/getenv returns \"\" (truthy) for an unset
+   variable, so test for a non-blank value:
 
-     (when (os/getenv \"LGX_RUN\") (nrepl/start!))"
+     (when-not (str/blank? (os/getenv \"LGX_RUN\")) (nrepl/start!))"
   ([] (start! {}))
   ([{:keys [port] :or {port 0}}]
    (shim/Start port)))
