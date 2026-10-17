@@ -130,7 +130,9 @@ func FromJSON(v any) (vm.Value, error) {
 	case nil:
 		return vm.NIL, nil
 	case float64:
-		if t == math.Trunc(t) && t >= math.MinInt64 && t <= math.MaxInt64 {
+		// 2^63 is exact as a float64 while MaxInt64 is not (it rounds up
+		// to 2^63), so the upper bound has to be exclusive.
+		if t == math.Trunc(t) && t >= -(1<<63) && t < 1<<63 {
 			return vm.Int(int64(t)), nil
 		}
 		return vm.Float(t), nil
