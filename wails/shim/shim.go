@@ -31,7 +31,6 @@ import (
 
 	"github.com/nooga/let-go/pkg/rt"
 	"github.com/nooga/let-go/pkg/vm"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // BridgeMethod is the fully-qualified name the frontend calls. Exported
@@ -77,24 +76,6 @@ func (b *Bridge) Call(name string, args []any) (any, error) {
 // Register binds a let-go fn to a name the frontend can call.
 func Register(name string, fn vm.Fn) { handlers.Store(name, fn) }
 
-// NewWindow opens a window. Same reasoning as New.
-func NewWindow(app *application.App, opts vm.Value) *application.WebviewWindow {
-	o := application.WebviewWindowOptions{}
-	if s, ok := optString(opts, "title"); ok {
-		o.Title = s
-	}
-	if n, ok := optInt(opts, "width"); ok {
-		o.Width = n
-	}
-	if n, ok := optInt(opts, "height"); ok {
-		o.Height = n
-	}
-	if s, ok := optString(opts, "url"); ok {
-		o.URL = s
-	}
-	return app.Window.NewWithOptions(o)
-}
-
 // init registers the namespace directly rather than through
 // rt.RegisterInstaller - the same reason the -out-pkg output does. pkg/rt
 // drains its installer queue during its own package init, and Go runs an
@@ -110,5 +91,13 @@ func init() {
 	ns.Def("Run", vm.MustBox(Run))
 	ns.Def("Quit", vm.MustBox(Quit))
 	ns.Def("OnEvent", vm.MustBox(OnEvent))
+	ns.Def("SetTitle", vm.MustBox(SetTitle))
+	ns.Def("Show", vm.MustBox(Show))
+	ns.Def("Hide", vm.MustBox(Hide))
+	ns.Def("Close", vm.MustBox(Close))
+	ns.Def("Focus", vm.MustBox(Focus))
+	ns.Def("Reload", vm.MustBox(Reload))
+	ns.Def("ExecJS", vm.MustBox(ExecJS))
+	ns.Def("InvokeSync", vm.MustBox(InvokeSync))
 	rt.RegisterNS(ns)
 }

@@ -1,0 +1,25 @@
+;; Window controls. Server mode has no real window, so these prove the fns
+;; are wired and safe to call; what they do to a native window is checked
+;; by hand on a desktop.
+(ns wails.window-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [clojure.test :refer [deftest is]]))
+
+(deftest controls-are-callable
+  (let [win (t/win)]
+    (is (nil? (w/set-title! win "renamed")))
+    (is (nil? (w/show! win)))
+    (is (nil? (w/focus! win)))
+    (is (nil? (w/reload! win)))
+    (is (nil? (w/exec-js! win "1+1")))))
+
+(deftest new-window-takes-the-new-options
+  (is (some? (w/new-window (t/app) {:title "second" :min-width 200
+                                    :min-height 100 :hidden true}))))
+
+(deftest on-main-runs-the-fn
+  (let [ran (promise)
+        done (future (w/on-main! (fn [] (deliver ran :yes))))]
+    (is (= :yes (deref ran 3000 :timeout)))
+    (is (nil? (deref done 3000 :timeout)))))

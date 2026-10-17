@@ -24,10 +24,31 @@
   (shim/New opts))
 
 (defn new-window
-  "Open a window. opts keys (all optional): \"title\", \"width\",
-   \"height\", \"url\"."
+  "Open a window and return it. opts keys, keywords or strings, all
+   optional: :title, :width, :height, :min-width, :min-height, :url (the
+   path to load, default /), :hidden (create it hidden; show! it later)."
   [app opts]
   (shim/NewWindow app opts))
+
+;; Window controls. Wails moves each onto the main thread itself, so they
+;; are safe from any thread: a handler, a menu click, an nREPL eval.
+
+(defn set-title! "Set the window's title." [win title] (shim/SetTitle win title) nil)
+(defn show! "Show the window." [win] (shim/Show win) nil)
+(defn hide! "Hide the window." [win] (shim/Hide win) nil)
+(defn close! "Close the window." [win] (shim/Close win) nil)
+(defn focus! "Focus the window." [win] (shim/Focus win) nil)
+(defn reload! "Reload the window's page." [win] (shim/Reload win) nil)
+(defn exec-js! "Run JavaScript in the window's page." [win js] (shim/ExecJS win js) nil)
+
+(defn on-main!
+  "Run `f`, a fn of no args, on the main thread and wait for it. The window
+   fns above do this already; use it for anything else the platform
+   requires on the main thread. Returns nil; an exception `f` throws is
+   printed to stderr."
+  [f]
+  (shim/InvokeSync f)
+  nil)
 
 (defn handler!
   "Register `f` as the handler the frontend reaches by `name`. The
