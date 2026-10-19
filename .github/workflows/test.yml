@@ -43,7 +43,7 @@ jobs:
           set -euo pipefail
           packages="$(bash .github/scripts/changed-packages.sh)"
           echo "packages to test: ${packages:-<none>}"
-          # A package with a tagged Go shim (sql, duckdb) pins the *released*
+          # A package with a tagged Go shim (duckdb) pins the *released*
           # shim in its lgx.edn (see "Releasing" in the README), so a change
           # to <pkg>/shim/ would otherwise be tested against the published Go
           # module, not the checked-out code. Flip each changed shim's coord
@@ -51,7 +51,7 @@ jobs:
           # author makes locally. A tag run writes no changed-paths file, and
           # most runs change no shim: both are no-ops. The pattern stops after
           # the version string, so any key that follows it on the coord
-          # survives the flip. A package with an in-tree shim (livekit, wails, nrepl) is exempt
+          # survives the flip. A package with an in-tree shim (livekit, wails, nrepl, sql) is exempt
           # by design: its coord is already {:go/local "shim"}, so it tests the
           # working tree as is, and having no :go/version it never matches.
           shim_pkgs=""

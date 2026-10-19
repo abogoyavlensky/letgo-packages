@@ -1,0 +1,124 @@
+;; Driver-level tests for the sql layer's sessions and cancellation, over a
+;; real sqlite file: what the shim's context support does once a driver is
+;; behind it. Run with: lgx test  (from sqlite/; the :test context points
+;; the sql layer at the working tree)
+
+(ns sqlite.core-test
+  (:require [clojure.test :refer [deftest is]]
+            [sql.core :as sql]
+            [sql.shim :as shim]
+            [sqlite.core :as sqlite]
+            [string :as str]))
+
+;; Runs for minutes on sqlite, so a cancel is the only way it ends in time.
+(def ^:private runaway
+  (str "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c"
+       " WHERE x < 1000000000) SELECT count(*) FROM c"))
+
+(defn- with-db [f]
+  (let [path (str "/tmp/letgo-sqlite-test-" (random-uuid) ".db")
+        conn (sqlite/open path)]
+    (try
+      (f conn)
+      (finally
+        (sqlite/close! conn)
+        (os/sh "rm" "-f" path)))))
+
+(defn- thrown-message
+  "The message of what f throws, or nil when it returns."
+  [f]
+  (try (f) nil (catch e (ex-message e))))
+
+(deftest execute-still-works-on-the-pool
+  (with-db
+    (fn [conn]
+      (sqlite/execute! conn ["create table t (x integer)"])
+      (sqlite/execute! conn ["insert into t (x) values (?)" 7])
+      (is (= [{:x 7}] (sqlite/query conn ["select x from t"]))))))
+
+(deftest a-session-keeps-its-state
+  (with-db
+    (fn [conn]
+      (let [session (shim/Conn (:sql/handle conn))
+            ctx (shim/NewCtx)]
+        (try
+          ;; Temp tables live on one connection, so only the session sees it.
+          (shim/ExecCtx session ctx "create temp table t (x integer)" [])
+          (shim/ExecCtx session ctx "insert into t (x) values (?)" [1])
+          (let [rows (shim/QueryCtx session ctx "select x from t" [])]
+            (is (.Next rows))
+            (is (= [1] (vec (shim/ScanRow rows))))
+            (.Close rows))
+          (is (= [{:x 1}] (sql/execute! {:sql/handle session} ["select x from t"])))
+          (is (str/includes? (str (thrown-message
+                                   #(sqlite/query conn ["select x from t"])))
+                             "no such table"))
+          (finally
+            (.Cancel ctx)
+            (.Close session)))))))
+
+(deftest column-type-names
+  (with-db
+    (fn [conn]
+      (sqlite/execute! conn ["create table t (a integer, b text)"])
+      (let [rows (shim/Query (:sql/handle conn) "select a, b from t" [])]
+        (try
+          (is (= ["INTEGER" "TEXT"] (vec (shim/ColumnTypeNames rows))))
+          (finally (.Close rows)))))))
+
+(deftest cancel-before-the-first-row
+  (with-db
+    (fn [conn]
+      (let [ctx (shim/NewCtx)
+            started (System/nanoTime)
+            result (future
+                     (try
+                       (let [rows (shim/QueryCtx (:sql/handle conn) ctx runaway [])]
+                         ;; The interrupt may surface on the first Next
+                         ;; rather than from Query itself.
+                         (try
+                           (.Next rows)
+                           (if-let [err (.Err rows)]
+                             {:error (str err)}
+                             {:returned true})
+                           (finally (.Close rows))))
+                       (catch e {:error (ex-message e)})))]
+        (sleep 200)
+        (is (not (.Canceled ctx)))
+        (.Cancel ctx)
+        (let [r (deref result 5000 :timeout)
+              ms (/ (- (System/nanoTime) started) 1000000)]
+          (is (not= :timeout r))
+          ;; database/sql reports the context's error; the driver's own
+          ;; "interrupted" can surface instead, depending on where the
+          ;; interrupt lands.
+          (is (let [msg (str/lower-case (str (:error r)))]
+                (or (str/includes? msg "context canceled")
+                    (str/includes? msg "interrupt")))
+              (str "expected a cancel error, got " (pr-str r)))
+          (is (< ms 5000))
+          (is (.Canceled ctx)))))))
+
+(deftest cancel-mid-read
+  (with-db
+    (fn [conn]
+      (let [ctx (shim/NewCtx)
+            rows (shim/QueryCtx (:sql/handle conn) ctx
+                                (str "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL"
+                                     " SELECT x + 1 FROM c WHERE x < 1000000)"
+                                     " SELECT x FROM c")
+                                [])]
+        (try
+          (is (.Next rows))
+          (.Cancel ctx)
+          (let [n (loop [n 0]
+                    (if (and (< n 2000000) (.Next rows)) (recur (inc n)) n))]
+            (is (< n 1000000) "the cursor stops before the end")
+            (is (some? (.Err rows))))
+          (finally (.Close rows)))))))
+
+(deftest cancel-twice-is-a-no-op
+  (let [ctx (shim/NewCtx)]
+    (.Cancel ctx)
+    (.Cancel ctx)
+    (is (.Canceled ctx))))
