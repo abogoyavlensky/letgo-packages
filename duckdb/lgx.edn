@@ -11,7 +11,7 @@
         ;; below points it at the working tree.
         abogoyavlensky/letgo-sql
         {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-         :git/tag "sql-v0.2.0"
+         :git/tag "sql-v0.3.0"
          :deps/root "sql"}
 
         ;; NOT pure Go: the driver is cgo over a prebuilt static libduckdb, so
