@@ -41,7 +41,7 @@ Otherwise the same as the other drivers:
  :lg-runtime :built
  :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-duckdb {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-                                     :git/tag "duckdb-v0.1.0"
+                                     :git/tag "duckdb-v0.3.0"
                                      :deps/root "duckdb"}}}
 ```
 

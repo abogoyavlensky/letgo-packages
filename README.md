@@ -9,7 +9,7 @@ Depend on one with `:deps/root`:
 ```clojure
 {:deps {abogoyavlensky/letgo-sqlite
         {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-         :git/tag "sqlite-v0.1.0"
+         :git/tag "sqlite-v0.3.0"
          :deps/root "sqlite"}}}
 ```
 
