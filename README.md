@@ -60,7 +60,7 @@ Two kinds of tags live in this repo:
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
 Only `sql`, `wails`, `duckdb`, `livekit` and `nrepl` have a shim, and only
-`sql` and `duckdb` cut Go module tags for it (see "In-tree shims" below).
+`duckdb` cuts Go module tags for it (see "In-tree shims" below).
 `sqlite`, `postgres` and `ragtime` have none, and their release is the
 package tag alone. All four SQL packages depend on `sql` by package tag
 (`{:git/url ... :git/tag "sql-vX.Y.Z" :deps/root "sql"}`) and inherit its
@@ -78,10 +78,10 @@ with the package tag alone: the `livekit-vX.Y.Z` checkout carries the shim,
 and lgx 0.4.2 or newer reuses the built runtime until the shim's files
 change. There is no Go module tag to cut, no coord to flip, and CI tests the
 working-tree shim as is. New packages with a shim should follow this model.
-livekit was the pilot, and `wails` (from wails-v0.2.0) and `nrepl` follow
-it; the existing `livekit/shim/v0.1.0` and `wails/shim/v0.1.0` tags stay as
-history. The steps below apply to `sql` and `duckdb` until each is moved
-over.
+livekit was the pilot, and `wails` (from wails-v0.2.0), `nrepl` and `sql`
+(from sql-v0.3.0) follow it; the existing `livekit/shim/v0.1.0`,
+`wails/shim/v0.1.0` and `sql/shim/v0.1.0` tags stay as history. The steps
+below apply to `duckdb` until it is moved over.
 
 When a shim changed, in this order:
 
@@ -101,8 +101,8 @@ flipped `lgx.edn`. When only `.lg` files changed, do step 4 alone.
 
 When `sql/` changed, release it before its dependents:
 
-1. Release `sql` itself: the shim steps above if its shim changed, then
-   tag `sql-vX.Y.Z` and push.
+1. Release `sql` itself: tag `sql-vX.Y.Z` and push. Its shim is in-tree,
+   so the tag carries any shim change.
 2. Set the `letgo-sql` coord in `sqlite`, `postgres`, `duckdb` and
    `ragtime` to that tag and commit.
 3. Tag the four packages `<pkg>-vX.Y.Z` on that commit and push.
@@ -127,7 +127,7 @@ release carrying the interop work; consumers pin it with
 record a Go module tag permanently, and lgx caches a `:git/tag` checkout
 under the tag name. Fix forward with a new version.
 
-**Working on a shim.** Flip `<pkg>/lgx.edn` back to `{:go/local "shim"}`
+**Working on a tagged shim (duckdb).** Flip `<pkg>/lgx.edn` back to `{:go/local "shim"}`
 locally. lgx then rebuilds the runtime whenever the shim's files change (on
 every command before lgx 0.4.2) — incremental, about a second — so edits to
 `shim.go` take effect, and each `example/` picks them up through its `:local/root ".."` dep. Do not commit the

@@ -110,11 +110,50 @@ rolls back and rethrows on a throw. Two deliberate behaviors:
 Nesting is unsupported and throws: `database/sql` has no savepoint API,
 so a nested transaction would silently be a second independent one.
 
+### Sessions and cancellation
+
+`sql.core` runs on whatever handle it is given. For work that needs a
+dedicated connection or a way to stop a running query - a database
+client, a long report - the shim exposes `database/sql`'s context
+methods:
+
+```clojure
+(require '[sql.shim :as shim])
+
+(let [session (shim/Conn (:sql/handle conn))  ; a dedicated *sql.Conn
+      ctx (shim/NewCtx)]                      ; a cancellable context
+  ;; from another thread, at any time: (.Cancel ctx)
+  (let [rows (shim/QueryCtx session ctx "select ..." [])]
+    (shim/ColumnTypeNames rows)               ; => ["INTEGER" "TEXT"]
+    ...)
+  (.Cancel ctx)                               ; release it when done
+  (.Close session))                           ; back to the pool
+```
+
+| | |
+|---|---|
+| `(shim/NewCtx)` | A cancellable context. `(.Cancel ctx)` is idempotent; `(.Canceled ctx)` reports whether it was called. Create it before the query starts so a cancel can arrive before the first row. |
+| `(shim/QueryCtx c ctx q params)` `(shim/ExecCtx c ctx q params)` | `Query`/`Exec` under `ctx`. `c` is a `*sql.DB`, `*sql.Tx` or `*sql.Conn`. |
+| `(shim/Conn db)` | Take a session from the pool. Session state (`BEGIN`, temp tables, `SET`) stays on it across calls. Close it to return it. |
+| `(shim/ColumnTypeNames rows)` | Each column's database type name, in column order; `""` where the driver does not know it. |
+
+Cancelling while the query executes interrupts it in the driver (sqlite
+calls `sqlite3_interrupt`; pgx sends a protocol cancel request), and the
+call fails promptly, usually with `context canceled`. Cancelling after
+rows came back makes `database/sql` close them: `.Next` returns false and
+`.Err` reports the context error. Check `(.Canceled ctx)` rather than
+the message to tell a cancel from a failure.
+
+`execute!` and `execute-one!` accept a session as the handle
+(`{:sql/handle session}`). `with-transaction` does not: it calls
+`.Begin`, which `*sql.Conn` lacks. Run `BEGIN` / `COMMIT` as statements
+on the session instead.
+
 ## Layout
 
 ```
 sql/
-├── lgx.edn        :go/interop for database/sql + the shim (:go/version)
+├── lgx.edn        :go/interop for database/sql + the shim (:go/local)
 ├── src/sql/
 │   └── core.lg    the API above
 ├── test/          direct tests for the returns-rows? heuristic
@@ -122,7 +161,7 @@ sql/
 ```
 
 The shim exists because three things do not survive automatic binding
-generation:
+generation (and one that has no let-go form at all):
 
 - **`Scan`'s out-parameters.** `(*sql.Rows).Scan` writes through
   caller-allocated pointers, and let-go values are immutable. `ScanRow`
@@ -132,9 +171,13 @@ generation:
   let-go, so a wrapper holding its parameters in a vector cannot spread
   them into `(.Query db q p1 p2)`. `Query`/`Exec` take a slice and
   spread it in Go.
-- **A common type for `*sql.DB` and `*sql.Tx`.** `database/sql` declares
-  none, so the shim's `Connectable` interface is what lets `execute!`
-  work identically inside and outside a transaction.
+- **A common type for `*sql.DB`, `*sql.Tx` and `*sql.Conn`.**
+  `database/sql` declares none, so the shim's `Connectable` interface
+  (the `...Context` methods all three share) is what lets `execute!`
+  work identically on a pool, in a transaction, and on a session.
+- **A `context.Context`.** let-go cannot build one, so `Ctx` wraps a
+  cancellable context and `QueryCtx`/`ExecCtx`/`Conn` take it, or
+  `context.Background()`, on the caller's behalf.
 
 Values cross the boundary as plain `[]any` in both directions; let-go's
 boxing layer converts elements by their dynamic type, so scanned columns
