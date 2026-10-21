@@ -163,12 +163,22 @@
         (is (some? err))
         (is (< ms 4000) (str "took " ms " ms"))))))
 
+;; A keyword DSN whose password mentions connect_timeout: only a real
+;; setting counts, so the default still applies.
 (deftest connect-timeout-defaults-to-ten-seconds
   (with-stalling-server
     (fn [port]
-      (let [[err ms] (ping-ms (str "postgres://u:p@127.0.0.1:" port "/db"))]
+      (let [[err ms] (ping-ms (str "host=127.0.0.1 port=" port " user=u dbname=db"
+                                   " password='x connect_timeout=0'"))]
         (is (some? err))
         (is (< 9000 ms 15000) (str "took " ms " ms"))))))
 
 (deftest a-malformed-dsn-throws
   (is (some? (thrown-message #(pg/open "postgres://u@127.0.0.1:notaport/db")))))
+
+(deftest an-explicit-zero-connect-timeout-means-none
+  (with-stalling-server
+    (fn [port]
+      (let [f (future (ping-ms (str "postgres://u:p@127.0.0.1:" port "/db?connect_timeout=0")))]
+        (is (= :still-connecting (deref f 11500 :still-connecting))
+            "connect_timeout=0 is no timeout, not the 10 s default")))))

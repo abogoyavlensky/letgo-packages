@@ -30,8 +30,9 @@
                If the server does not answer within 10 s, the connection
                is closed after all.
 
-   A DSN without connect_timeout gets a 10 s one: pgx's own default is
-   none, so an unreachable host would hang the first query.
+   Unless the DSN, PGCONNECT_TIMEOUT or a service file sets
+   connect_timeout (0 means none), connecting is bounded by 10 s: pgx's own default is none, so an
+   unreachable host would hang the first query.
 
    :keys defaults to :unqualified-lower here (not :unqualified): Postgres
    folds unquoted identifiers to lower case, so lower-casing makes

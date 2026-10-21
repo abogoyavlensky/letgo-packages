@@ -62,9 +62,11 @@ the package's shim (`postgres.shim/Open`) builds that config.
 
 ## Connect timeout
 
-A DSN without `connect_timeout` gets a 10 s one. pgx's own default is
-none, which leaves a ping or first query to an unreachable host hanging
-for minutes.
+Unless the DSN, `PGCONNECT_TIMEOUT` or a service file sets
+`connect_timeout`, connecting
+is bounded by 10 s. pgx's own default is none, which leaves a ping or
+first query to an unreachable host hanging for minutes. An explicit
+`connect_timeout=0` still means no timeout.
 
 ## Tests
 
