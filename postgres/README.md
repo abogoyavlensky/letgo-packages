@@ -35,6 +35,49 @@ Verified round-trips: integer, float, text, boolean (as real `true` /
   e.g. `"{a,b}"`, not as a vector — `database/sql` has no portable array
   scanning. Parse it yourself or `unnest` in SQL.
 
+- `bytea` arrives as a string that has lost its bytes: the `sql` shim
+  turns every `[]byte` into a string, which suits text but not binary
+  data. Encode in SQL (`encode(col, 'hex')`) when you need the value.
+
+## Cancellation
+
+A query run through `sql.shim/QueryCtx` or `ExecCtx` stops when its
+`Ctx` is cancelled (see the [sql README](../sql/README.md#sessions-and-cancellation)).
+What happens to the connection afterwards is chosen at `open`:
+
+```clojure
+(db/open url {:postgres/cancel :request})
+```
+
+| `:postgres/cancel` | The server | The connection |
+|---|---|---|
+| `:close` (default) | is sent a cancel request | is closed: a dedicated session (`sql.shim/Conn`) answers `driver: bad connection` from then on |
+| `:request` | is sent a cancel request | stays usable, session state and all, as after Ctrl+C in `psql`; closed only if the server has not answered within 10 s |
+
+`:close` is pgx's own behaviour and stays the default. Use `:request`
+for an interactive client that holds sessions, where a cancel must not
+drop the user's temp tables, `SET`s or open transaction. pgx picks the
+mode through a Go function in its config, which no DSN can express, so
+the package's shim (`postgres.shim/Open`) builds that config.
+
+## Connect timeout
+
+A DSN without `connect_timeout` gets a 10 s one. pgx's own default is
+none, which leaves a ping or first query to an unreachable host hanging
+for minutes.
+
+## Tests
+
+`lgx test` runs the driver tests when `POSTGRES_TEST_URL` points at a
+server, and skips them otherwise:
+
+```sh
+docker run --rm -d --name lgp-pg -e POSTGRES_PASSWORD=pg -p 127.0.0.1::5432 postgres:17-alpine
+POSTGRES_TEST_URL="postgres://postgres:pg@$(docker port lgp-pg 5432)/postgres" lgx test
+```
+
+The connect-timeout tests need `python3`.
+
 See [`example/`](example/) for a full walkthrough and the
 [sqlite README](../sqlite/README.md) for requirements and the
 development workflow, which are the same here.
