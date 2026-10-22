@@ -2,31 +2,51 @@
 ;; of the driver-agnostic sql.core API, so a consumer needs one require.
 ;;
 ;; The driver is github.com/jackc/pgx/v5 (pure Go) through its stdlib
-;; adapter, which registers itself with database/sql as "pgx" when the
-;; runtime links it.
+;; adapter. Pools are opened by postgres.shim/Open, which builds the pgx
+;; config itself: what a cancelled query does to a connection is a Go
+;; function there, which no DSN can express.
 ;;
 ;; let-go's clojure.core defines open and close!, which JVM Clojure's does not;
 ;; excluding them keeps the require free of redefinition warnings.
 (ns postgres.core
   (:refer-clojure :exclude [open close!])
-  (:require [sql]
+  (:require [postgres.shim :as shim]
             [sql.core]))
 
-(def ^:private driver "pgx")
+(def ^:private cancel-modes #{nil :close :request})
 
 (defn open
   "Open a connection pool for `dsn` — a connection URL
    (\"postgres://user:pass@localhost:5432/mydb\") or key=value DSN.
    Returns a connectable for the fns below. opts become the connection's
-   defaults, merged under per-call opts.
+   defaults, merged under per-call opts, except :postgres/cancel, which
+   says what a cancelled query does to its connection:
+
+     :close    (the default) pgx's own behaviour: the server is asked to
+               cancel, and the connection is closed. A dedicated session
+               (sql.shim/Conn) is dead afterwards.
+     :request  the server is asked to cancel, and the connection stays
+               usable, with its session state, as after Ctrl+C in psql.
+               If the server does not answer within 10 s, the connection
+               is closed after all.
+
+   Unless the DSN, PGCONNECT_TIMEOUT or a service file sets
+   connect_timeout (0 means none), connecting is bounded by 10 s: pgx's own default is none, so an
+   unreachable host would hang the first query.
 
    :keys defaults to :unqualified-lower here (not :unqualified): Postgres
    folds unquoted identifiers to lower case, so lower-casing makes
    `select ID, Name` and `select id, name` yield the same keywords."
   ([dsn] (open dsn nil))
   ([dsn opts]
-   {:sql/handle (sql/Open driver dsn)
-    :sql/opts (merge {:keys :unqualified-lower} opts)}))
+   (let [mode (:postgres/cancel opts)]
+     (when-not (contains? cancel-modes mode)
+       (throw (ex-info (str ":postgres/cancel must be :close or :request, got: "
+                            (pr-str mode))
+                       {:postgres/cancel mode})))
+     {:sql/handle (shim/Open dsn (= :request mode))
+      :sql/opts (merge {:keys :unqualified-lower}
+                       (dissoc opts :postgres/cancel))})))
 
 (defn close!
   "Close a connectable (or bare handle). Returns the close error as a

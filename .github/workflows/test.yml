@@ -13,6 +13,22 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # postgres' tests run against this server; without POSTGRES_TEST_URL
+    # they skip.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: pg
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      POSTGRES_TEST_URL: postgres://postgres:pg@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,7 +67,7 @@ jobs:
           # author makes locally. A tag run writes no changed-paths file, and
           # most runs change no shim: both are no-ops. The pattern stops after
           # the version string, so any key that follows it on the coord
-          # survives the flip. A package with an in-tree shim (livekit, wails, nrepl, sql) is exempt
+          # survives the flip. A package with an in-tree shim (livekit, wails, nrepl, sql, postgres) is exempt
           # by design: its coord is already {:go/local "shim"}, so it tests the
           # working tree as is, and having no :go/version it never matches.
           shim_pkgs=""

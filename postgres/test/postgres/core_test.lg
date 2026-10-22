@@ -1,0 +1,184 @@
+;; Driver-level tests against a real Postgres. They need a server: set
+;; POSTGRES_TEST_URL (CI runs one as a service container), e.g.
+;;
+;;   docker run --rm -d --name lgp-pg -e POSTGRES_PASSWORD=pg \
+;;     -p 127.0.0.1::5432 postgres:17-alpine
+;;   POSTGRES_TEST_URL=postgres://postgres:pg@127.0.0.1:PORT/postgres lgx test
+;;
+;; Without it every test returns without asserting anything.
+
+(ns postgres.core-test
+  (:require [clojure.test :refer [deftest is]]
+            [postgres.core :as pg]
+            [sql.shim :as shim]
+            [string :as str]))
+
+;; os/getenv returns "" for an unset variable.
+(def ^:private url (os/getenv "POSTGRES_TEST_URL"))
+(def ^:private enabled? (not (str/blank? url)))
+
+(when-not enabled?
+  (println "postgres.core-test: POSTGRES_TEST_URL is unset, skipping"))
+
+(defmacro ^:private with-server
+  "Run body only when a test server is configured."
+  [& body]
+  `(when enabled? ~@body))
+
+(def ^:private runaway "select pg_sleep(30)")
+
+(defn- thrown-message
+  "The message of what f throws, or nil when it returns."
+  [f]
+  (try (f) nil (catch e (ex-message e))))
+
+(defn- with-conn [opts f]
+  (let [conn (pg/open url opts)]
+    (try (f conn) (finally (pg/close! conn)))))
+
+(defn- one
+  "The first column of the first row q returns on the connectable c, or
+   nil when there is no row."
+  [c q]
+  (let [rows (shim/Query c q [])]
+    (try
+      (when (.Next rows)
+        (first (shim/ScanRow rows)))
+      (finally (.Close rows)))))
+
+(defn- poll
+  "Call f every 100 ms until it returns truthy or ms pass; its last value."
+  [ms f]
+  (let [deadline (+ (System/nanoTime) (* ms 1000000))]
+    (loop []
+      (let [v (f)]
+        (if (or v (> (System/nanoTime) deadline))
+          v
+          (do (sleep 100) (recur)))))))
+
+(defn- cancel-runaway!
+  "Run the runaway on session, cancel it after 300 ms, and return the error
+   message the run ended with, or :timeout."
+  [session]
+  (let [ctx (shim/NewCtx)
+        f (future
+            (try (shim/ExecCtx session ctx runaway []) :returned
+                 (catch e (ex-message e))))]
+    (sleep 300)
+    (.Cancel ctx)
+    (deref f 10000 :timeout)))
+
+(deftest open-and-query
+  (with-server
+    (with-conn nil
+      (fn [conn]
+        (pg/execute! conn ["create temp table t (id int, name text)"])
+        (pg/execute! conn ["insert into t values (1, 'a')"])
+        (is (= [{:id 1 :name "a"}] (pg/query conn ["select id, name from t"])))))))
+
+(deftest column-type-names
+  (with-server
+    (with-conn nil
+      (fn [conn]
+        (let [rows (shim/Query (:sql/handle conn)
+                               "select 1::int8 a, 'x'::text b, now() c" [])]
+          (try
+            (is (= ["INT8" "TEXT" "TIMESTAMPTZ"] (vec (shim/ColumnTypeNames rows))))
+            (finally (.Close rows))))))))
+
+(deftest cancel-request-keeps-the-session
+  (with-server
+    (with-conn {:postgres/cancel :request}
+      (fn [conn]
+        (let [db (:sql/handle conn)
+              session (shim/Conn db)]
+          (try
+            (shim/Exec session "create temp table kept (x int)" [])
+            (let [pid (one session "select pg_backend_pid()")
+                  msg (cancel-runaway! session)]
+              (is (str/includes? (str msg) "canceling statement due to user request")
+                  (str "expected a server-side cancel, got " (pr-str msg)))
+              ;; pg_stat_activity keeps a session's last query after it
+              ;; ends, so look for the backend still being active.
+              (is (poll 5000 #(not= "active"
+                                    (one db (str "select state from pg_stat_activity"
+                                                 " where pid = " pid))))
+                  "the query stopped on the server")
+              (is (= 1 (one session "select 1")) "the session still answers")
+              (is (= 0 (one session "select count(*) from kept"))
+                  "the session's temp table survived"))
+            (finally (.Close session))))))))
+
+(deftest default-cancel-closes-the-session
+  (with-server
+    (with-conn nil
+      (fn [conn]
+        (let [session (shim/Conn (:sql/handle conn))]
+          (try
+            (is (some? (cancel-runaway! session)))
+            (is (str/includes? (str (thrown-message #(one session "select 1")))
+                               "bad connection"))
+            (finally (.Close session))))))))
+
+(deftest unknown-cancel-mode-is-rejected
+  (is (str/includes? (str (thrown-message #(pg/open "postgres://x@127.0.0.1/x"
+                                                    {:postgres/cancel :sometimes})))
+                     ":postgres/cancel")))
+
+;; A closed port fails at once whatever the timeout, so these need a server
+;; that accepts and then never answers. python3 runs one in the background
+;; and writes its port to a file.
+(defn- with-stalling-server [f]
+  (let [port-file (str "/tmp/lgp-stall-" (System/nanoTime))
+        script (str "import socket, time\n"
+                    "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(8)\n"
+                    "open('" port-file "', 'w').write(str(s.getsockname()[1]))\n"
+                    "conns = []\n"
+                    "end = time.time() + 60\n"
+                    "s.settimeout(1)\n"
+                    "while time.time() < end:\n"
+                    "    try: conns.append(s.accept())\n"
+                    "    except OSError: pass\n")]
+    (os/sh "sh" "-c" (str "python3 -c \"$0\" >/dev/null 2>&1 &") script)
+    (let [port (poll 5000 #(let [r (os/sh "cat" port-file)]
+                             (when (= 0 (:exit r))
+                               (not-empty (str/trim (:out r))))))]
+      (try
+        (f port)
+        (finally (os/sh "rm" "-f" port-file))))))
+
+(defn- ping-ms
+  "Ping a pool for dsn; [error-or-nil elapsed-ms]."
+  [dsn]
+  (let [conn (pg/open dsn)
+        t0 (System/nanoTime)]
+    (try
+      [(.Ping (:sql/handle conn)) (/ (- (System/nanoTime) t0) 1000000)]
+      (finally (pg/close! conn)))))
+
+(deftest connect-timeout-from-the-dsn
+  (with-stalling-server
+    (fn [port]
+      (let [[err ms] (ping-ms (str "postgres://u:p@127.0.0.1:" port "/db?connect_timeout=1"))]
+        (is (some? err))
+        (is (< ms 4000) (str "took " ms " ms"))))))
+
+;; A keyword DSN whose password mentions connect_timeout: only a real
+;; setting counts, so the default still applies.
+(deftest connect-timeout-defaults-to-ten-seconds
+  (with-stalling-server
+    (fn [port]
+      (let [[err ms] (ping-ms (str "host=127.0.0.1 port=" port " user=u dbname=db"
+                                   " password='x connect_timeout=0'"))]
+        (is (some? err))
+        (is (< 9000 ms 15000) (str "took " ms " ms"))))))
+
+(deftest a-malformed-dsn-throws
+  (is (some? (thrown-message #(pg/open "postgres://u@127.0.0.1:notaport/db")))))
+
+(deftest an-explicit-zero-connect-timeout-means-none
+  (with-stalling-server
+    (fn [port]
+      (let [f (future (ping-ms (str "postgres://u:p@127.0.0.1:" port "/db?connect_timeout=0")))]
+        (is (= :still-connecting (deref f 11500 :still-connecting))
+            "connect_timeout=0 is no timeout, not the 10 s default")))))
