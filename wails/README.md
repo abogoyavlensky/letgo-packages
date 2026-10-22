@@ -219,6 +219,7 @@ wails/
 │   ├── menu.go      the menu spec builder
 │   ├── dialogs.go   file and message dialogs
 │   ├── assets.go    the frontend served from resources
+│   ├── devserver*.go  FRONTEND_DEVSERVER_URL, off in production builds
 │   ├── callback.go  invoking let-go from Wails goroutines
 │   └── convert.go   values across the boundary
 ├── src/wails/
