@@ -17,7 +17,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -46,6 +45,12 @@ func connectTimeoutUnset(dsn string, cfg *pgx.ConnConfig) bool {
 	return !dsnHasKey(dsn, "connect_timeout")
 }
 
+// isSpace is pgx's whitespace for keyword/value DSNs: ASCII only, so a
+// byte of a multi-byte character (U+00A0's 0xA0) never splits a value.
+func isSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f'
+}
+
 // dsnHasKey reports whether a URL's query or a keyword/value DSN names key.
 // Keyword values are read with libpq's quoting ('...' with \' and \\), so
 // text inside a quoted password does not count.
@@ -56,7 +61,7 @@ func dsnHasKey(dsn, key string) bool {
 	}
 	i, n := 0, len(dsn)
 	skipSpace := func() {
-		for i < n && unicode.IsSpace(rune(dsn[i])) {
+		for i < n && isSpace(dsn[i]) {
 			i++
 		}
 	}
@@ -66,7 +71,7 @@ func dsnHasKey(dsn, key string) bool {
 			return false
 		}
 		start := i
-		for i < n && dsn[i] != '=' && !unicode.IsSpace(rune(dsn[i])) {
+		for i < n && dsn[i] != '=' && !isSpace(dsn[i]) {
 			i++
 		}
 		k := dsn[start:i]
@@ -84,7 +89,7 @@ func dsnHasKey(dsn, key string) bool {
 			}
 			i++
 		} else {
-			for i < n && !unicode.IsSpace(rune(dsn[i])) {
+			for i < n && !isSpace(dsn[i]) {
 				if dsn[i] == '\\' {
 					i++
 				}
