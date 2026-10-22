@@ -1,0 +1,26 @@
+;; A walkthrough of keyring.core on the in-memory keyring, so it runs the
+;; same anywhere and never touches your real Keychain. In an app, leave out
+;; use-memory! and the same calls go to the system keyring:
+;;
+;;   (kr/put! "MyApp" "db-profile-1" password)   ; Keychain item "MyApp"
+;;
+;; It throws on the first wrong answer.
+(ns main
+  (:require [keyring.core :as kr]))
+
+(defn- check [what expected actual]
+  (when (not= expected actual)
+    (throw (ex-info (str what ": expected " (pr-str expected) ", got " (pr-str actual)) {})))
+  (println "ok:" what))
+
+(kr/use-memory!)
+
+(check "nothing stored yet" nil (kr/get "MyApp" "db-profile-1"))
+(kr/put! "MyApp" "db-profile-1" "s3cret")
+(check "stored" "s3cret" (kr/get "MyApp" "db-profile-1"))
+(kr/put! "MyApp" "db-profile-1" "rotated")
+(check "replaced" "rotated" (kr/get "MyApp" "db-profile-1"))
+(kr/delete! "MyApp" "db-profile-1")
+(check "deleted" nil (kr/get "MyApp" "db-profile-1"))
+(kr/delete! "MyApp" "db-profile-1")
+(check "deleting again is a no-op" nil (kr/get "MyApp" "db-profile-1"))

@@ -1,0 +1,56 @@
+;; Tests for keyring.core, on the in-memory keyring: CI has no Secret
+;; Service, and a test must not write to a developer's real Keychain.
+;; Run with: lgx test  (from keyring/)
+
+(ns keyring.core-test
+  (:require [keyring.core :as kr]
+            [clojure.test :refer [deftest is]]))
+
+(kr/use-memory!)
+
+(deftest round-trip
+  (is (nil? (kr/put! "kr-test" "alice" "s3cret")))
+  (is (= "s3cret" (kr/get "kr-test" "alice")))
+  (is (nil? (kr/delete! "kr-test" "alice")))
+  (is (nil? (kr/get "kr-test" "alice"))))
+
+(deftest missing-entries
+  (is (nil? (kr/get "kr-test" "nobody")))
+  (is (nil? (kr/delete! "kr-test" "nobody"))))
+
+(deftest overwrite
+  (kr/put! "kr-test" "bob" "one")
+  (kr/put! "kr-test" "bob" "two")
+  (is (= "two" (kr/get "kr-test" "bob")))
+  (kr/delete! "kr-test" "bob"))
+
+(deftest services-and-users-stay-apart
+  (kr/put! "kr-a" "u" "a")
+  (kr/put! "kr-b" "u" "b")
+  (kr/put! "kr-a" "v" "c")
+  (is (= ["a" "b" "c"] [(kr/get "kr-a" "u") (kr/get "kr-b" "u") (kr/get "kr-a" "v")]))
+  (doseq [[s u] [["kr-a" "u"] ["kr-b" "u"] ["kr-a" "v"]]]
+    (kr/delete! s u)))
+
+(deftest passwords-arrive-as-stored
+  (kr/put! "kr-test" "empty" "")
+  (is (= "" (kr/get "kr-test" "empty")))
+  (kr/put! "kr-test" "spaces" "  p'w \\x \"q\"  ")
+  (is (= "  p'w \\x \"q\"  " (kr/get "kr-test" "spaces")))
+  (kr/delete! "kr-test" "empty")
+  (kr/delete! "kr-test" "spaces"))
+
+;; The memory provider has no lock of its own; the shim's mutex is what
+;; keeps concurrent callers from racing on its map.
+(deftest concurrent-calls
+  (let [fs (doall (for [i (range 50)]
+                    (future
+                      (let [u (str "user-" i)]
+                        (kr/put! "kr-conc" u (str "pw-" i))
+                        (let [got (kr/get "kr-conc" u)]
+                          (when (even? i) (kr/delete! "kr-conc" u))
+                          got)))))]
+    (is (= (mapv #(str "pw-" %) (range 50)) (mapv deref fs)))
+    (is (= (for [i (range 50)] (if (even? i) nil (str "pw-" i)))
+           (for [i (range 50)] (kr/get "kr-conc" (str "user-" i)))))
+    (doseq [i (range 50)] (kr/delete! "kr-conc" (str "user-" i)))))

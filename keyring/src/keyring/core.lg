@@ -1,0 +1,37 @@
+;; keyring.core - passwords in the system keyring: the macOS Keychain, the
+;; Secret Service on Linux, the Credential Manager on Windows.
+;;
+;; An entry is a password stored under a service (your app's name) and a
+;; user (an account name, or any id of yours). See keyring.shim for the Go
+;; side.
+(ns keyring.core
+  (:refer-clojure :exclude [get])
+  (:require [keyring.shim :as shim]))
+
+(defn put!
+  "Store password under service and user, replacing any stored one.
+   Returns nil; throws when the keyring refuses (locked, no Secret Service
+   running, the user denied access)."
+  [service user password]
+  (shim/Set service user password)
+  nil)
+
+(defn get
+  "The password stored under service and user, or nil when there is none."
+  [service user]
+  (shim/Get service user))
+
+(defn delete!
+  "Remove the password stored under service and user. Returns nil; a
+   missing entry is not an error."
+  [service user]
+  (shim/Delete service user)
+  nil)
+
+(defn use-memory!
+  "Replace the system keyring with an empty in-memory one, for tests and
+   headless runs. Process-wide and for the rest of the process: go-keyring
+   keeps its provider in a package variable."
+  []
+  (shim/UseMemory)
+  nil)
