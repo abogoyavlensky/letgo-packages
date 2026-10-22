@@ -133,9 +133,21 @@
   "Dev only: reload `win` whenever a file under `dir` changes (polled every
    300ms). Meant for `lgx run`, where the frontend is served from disk -
    point it at the resource dir the app serves, e.g. \"resources/public\".
-   Returns a fn of no args that stops the watcher."
+   This is the loop without a dev server; with one (see dev-server-url),
+   the dev server reloads the page itself. Returns a fn of no args that
+   stops the watcher."
   [win dir]
   (shim/WatchAssets win dir))
+
+(defn dev-server-url
+  "The frontend dev server the app's assets come from, or nil. Set
+   FRONTEND_DEVSERVER_URL (e.g. http://localhost:5173, a Vite dev server)
+   and the window loads the page through it, so a hot module reload works
+   while the bridge keeps answering. Always nil in a build with the
+   `production` tag."
+  []
+  (let [url (shim/DevServerURL)]
+    (when-not (= "" url) url)))
 
 (defn run!
   "Block on the Wails event loop. Must be called from the main goroutine,

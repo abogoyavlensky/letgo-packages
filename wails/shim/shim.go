@@ -131,5 +131,6 @@ func init() {
 	ns.Def("Message", vm.MustBox(Message))
 	ns.Def("DataDir", vm.MustBox(DataDir))
 	ns.Def("WatchAssets", vm.MustBox(WatchAssets))
+	ns.Def("DevServerURL", vm.MustBox(DevServerURL))
 	rt.RegisterNS(ns)
 }

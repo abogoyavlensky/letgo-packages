@@ -29,9 +29,9 @@ func New(opts vm.Value) (*application.App, error) {
 	case hasPrefix && hasDir:
 		return nil, errors.New("set :assets or :assets-dir, not both")
 	case hasPrefix && prefix != "":
-		o.Assets = application.AssetOptions{Handler: newResourceAssets(prefix)}
+		o.Assets = application.AssetOptions{Handler: withDevServer(newResourceAssets(prefix))}
 	case hasDir && dir != "":
-		o.Assets = application.AssetOptions{Handler: http.FileServer(http.Dir(dir))}
+		o.Assets = application.AssetOptions{Handler: withDevServer(http.FileServer(http.Dir(dir)))}
 	}
 	o.Mac.ApplicationShouldTerminateAfterLastWindowClosed = optBool(opts, "quit-on-last-window-closed")
 	onShutdown, err := optFn(opts, "on-shutdown")
