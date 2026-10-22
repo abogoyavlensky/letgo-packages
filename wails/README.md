@@ -40,7 +40,7 @@ a check on a desktop. The Linux GTK4/WebKitGTK window has never been run.
  :lg-runtime :built
  :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-wails {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-                                    :git/tag "wails-v0.2.0"
+                                    :git/tag "wails-v0.3.0"
                                     :deps/root "wails"}}}
 ```
 
@@ -97,6 +97,7 @@ Options maps take keyword or string keys alike (`{:title "x"}` or
 | `(message! app kind title body)` | A message dialog; `kind` is `:info`, `:warning` or `:error`. |
 | `(data-dir app-name)` | The per-user data directory (`~/Library/Application Support/<name>`, `~/.config/<name>`), created if missing. |
 | `(watch-assets! win dir)` | Dev only: reload `win` when a file under `dir` changes. Returns a stop fn. |
+| `(dev-server-url)` | The frontend dev server the assets come from (`FRONTEND_DEVSERVER_URL`), or `nil`. Always `nil` in a `production` build. |
 | `(run! app)` | Block on the event loop. Call it from the entry fn, on the main thread. Returns the error as a value, `nil` on a clean exit. |
 | `(quit! app)` | Stop the application. |
 | `bridge-method` | The fully-qualified name the frontend passes to `Call.ByName`. |
@@ -153,6 +154,38 @@ buffer, and the next call runs the new code. `set-menu!` again rebuilds
 the menu, and `watch-assets!` reloads the window when the frontend
 changes. Only what `-main` builds (the app, the windows) needs a restart.
 
+### Dev server (HMR)
+
+Reloading the whole window loses the page's state on every edit. For hot
+module replacement, run the frontend's dev server and point the app at it:
+
+```
+npx vite                                             # in the frontend dir
+FRONTEND_DEVSERVER_URL=http://localhost:5173 lgx run
+```
+
+With the variable set, the `:assets` (or `:assets-dir`) handler proxies
+every asset request to the dev server, through Wails' own proxy. The page
+keeps Wails' origin (`wails://localhost:5173` on macOS), so the bridge
+under `/wails/*` keeps answering. Wails waits up to 5 s for the dev server
+at startup and exits if it does not answer. Skip `watch-assets!` in this
+mode, since the dev server reloads the page itself.
+
+Vite's HMR websocket has to reach Vite directly. In server mode the page
+is served from Wails' port, where nothing answers a websocket, so fix the
+port in `vite.config.ts`:
+
+```js
+server: {
+  port: 5173,
+  strictPort: true,
+  ws: { protocol: "ws", host: "localhost", clientPort: 5173 },
+}
+```
+
+A build with the `production` tag ignores the variable and always serves
+the embedded frontend.
+
 ## Why there is no generated binding
 
 The other packages here (`sql`, `sqlite`, `postgres`) lean on `lginterop`
@@ -186,6 +219,7 @@ wails/
 │   ├── menu.go      the menu spec builder
 │   ├── dialogs.go   file and message dialogs
 │   ├── assets.go    the frontend served from resources
+│   ├── devserver*.go  FRONTEND_DEVSERVER_URL, off in production builds
 │   ├── callback.go  invoking let-go from Wails goroutines
 │   └── convert.go   values across the boundary
 ├── src/wails/
@@ -225,9 +259,9 @@ without a `!server` guard. `WAILS_SERVER_PORT` moves the port.
   let-go does not build for `GOOS=windows` yet — `pkg/rt/term.go` uses
   `golang.org/x/sys/unix` unguarded.
 - **Build tags.** Wails wants `-tags production` for release builds.
-  lgx after 0.5.0 has a `:go/build-tags` key (`:targets {:bin
-  {:go/build-tags ["production"]}}`); with 0.5.0 or older, use the
-  `GOFLAGS` environment variable.
+  lgx 0.5.1 has a `:go/build-tags` key (`:targets {:bin
+  {:go/build-tags ["production"]}}`), merged with any `GOFLAGS`; with
+  0.5.0 or older, use the `GOFLAGS` environment variable.
 - **Not everything is wrapped.** Tray icons, the clipboard, context menus,
   global shortcuts and screens are reachable from Wails but have no
   wrapper yet; each needs a func in the shim, for the struct-literal

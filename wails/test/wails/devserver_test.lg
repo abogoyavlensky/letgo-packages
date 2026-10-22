@@ -1,0 +1,35 @@
+;; FRONTEND_DEVSERVER_URL: the frontend comes from a dev server (Vite) while
+;; the page keeps Wails' origin, so the bridge still answers. The handler
+;; reads the variable on each request, which is what lets this test flip it
+;; on the one app the tests share.
+(ns wails.devserver-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(defn- fetch [path]
+  (t/app)
+  (http/get (t/url path)))
+
+(deftest assets-come-from-the-dev-server-while-it-is-set
+  (w/handler! "devserver-ping" (fn [] {:ok true}))
+  (let [dev (http/start (fn [req] {:status 200 :body (str "from-dev-server " (:uri req))})
+                        "127.0.0.1:0")
+        url (str "http://127.0.0.1:" (:port dev))]
+    (try
+      (os/setenv "FRONTEND_DEVSERVER_URL" url)
+      (is (= url (w/dev-server-url)))
+      (let [r (fetch "/")]
+        (is (= 200 (:status r)))
+        (is (= "from-dev-server /" (:body r))))
+      (is (= "from-dev-server /src/main.tsx" (:body (fetch "/src/main.tsx"))))
+      (is (= {"ok" true} (:json (t/call "devserver-ping")))
+          "the bridge is Wails', not the dev server's")
+      (finally
+        (os/setenv "FRONTEND_DEVSERVER_URL" "")
+        (http/stop dev)))
+    (is (nil? (w/dev-server-url)))
+    (let [r (fetch "/")]
+      (is (= 200 (:status r)))
+      (is (str/includes? (:body r) "wails test fixture")))))

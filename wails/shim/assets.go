@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/nooga/let-go/pkg/rt"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // resourceAssets serves the frontend from let-go's resources: URL path /x
@@ -61,4 +63,45 @@ func (h resourceAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func newResourceAssets(prefix string) http.Handler {
 	return resourceAssets{prefix: strings.Trim(prefix, "/")}
+}
+
+// devAware serves the frontend from the dev server while DevServerURL is
+// set, and from inner otherwise. Wails' own proxy
+// (application.AssetFileServerFS) only consults FRONTEND_DEVSERVER_URL
+// when it is the asset handler, which :assets and :assets-dir replace; this
+// puts it back in front of them. The page keeps Wails' origin, so the
+// bridge (/wails/*, answered by Wails before any asset handler) still
+// works, and Vite's HMR client talks to Vite directly.
+//
+// The URL is read per request rather than once at New: Wails allows one
+// app per process, so this is the only way a test can flip it.
+type devAware struct {
+	inner http.Handler
+
+	mu    sync.Mutex
+	url   string       // the URL proxy was built for
+	proxy http.Handler // Wails reads the variable when building it
+}
+
+func (h *devAware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	url := DevServerURL()
+	if url == "" {
+		h.inner.ServeHTTP(w, r)
+		return
+	}
+	h.proxyFor(url).ServeHTTP(w, r)
+}
+
+func (h *devAware) proxyFor(url string) http.Handler {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.proxy == nil || h.url != url {
+		h.proxy = application.AssetFileServerFS(nil)
+		h.url = url
+	}
+	return h.proxy
+}
+
+func withDevServer(inner http.Handler) http.Handler {
+	return &devAware{inner: inner}
 }
