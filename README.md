@@ -22,6 +22,7 @@ Depend on one with `:deps/root`:
 | [`livekit/`](livekit/) | Realtime audio/video: the [LiveKit](https://livekit.io) SFU embedded in the binary, as an integrant component, with join tokens and webhook verification |
 | [`wails/`](wails/) | Desktop apps over [Wails v3](https://v3.wails.io): a webview frontend with let-go handlers behind it |
 | [`ragtime/`](ragtime/) | Schema migrations with [ragtime](https://github.com/weavejester/ragtime)'s core: a `DataStore` and a `Migration` over `sql/`, so any driver package works |
+| [`keyring/`](keyring/) | Passwords in the system keyring (the macOS Keychain, the Secret Service on Linux) through the pure-Go `github.com/zalando/go-keyring`, with an in-memory store for tests |
 | [`nrepl/`](nrepl/) | An nREPL server inside a running program, so an editor can redefine code in a live app (a Wails window, an `http/serve` process) without a restart |
 | [`otel/`](otel/) | Traces, logs and metrics over OTLP/HTTP through the Go [OpenTelemetry](https://opentelemetry.io) SDK: spans with explicit parents, log records tied to them, counters, histograms and gauges, configured by the standard `OTEL_*` variables |
 
@@ -59,8 +60,8 @@ Two kinds of tags live in this repo:
 | Go module tag | `<pkg>/shim/vX.Y.Z` (e.g. `sql/shim/v0.1.0`) | `go get`, through the module proxy. Go dictates the form: a module whose `go.mod` sits in a subdirectory is versioned by a tag prefixed with that path. |
 | Package tag | `<pkg>-vX.Y.Z` (e.g. `sqlite-v0.1.0`) | lgx, via `:git/tag`. Go ignores tags that are not semver. |
 
-Only `sql`, `postgres`, `wails`, `duckdb`, `livekit` and `nrepl` have a
-shim, and only `duckdb` cuts Go module tags for it (see "In-tree shims"
+Only `sql`, `postgres`, `wails`, `duckdb`, `livekit`, `nrepl` and `keyring`
+have a shim, and only `duckdb` cuts Go module tags for it (see "In-tree shims"
 below). `sqlite` and `ragtime` have none, and their release is the
 package tag alone. All four SQL packages depend on `sql` by package tag
 (`{:git/url ... :git/tag "sql-vX.Y.Z" :deps/root "sql"}`) and inherit its
@@ -78,7 +79,7 @@ with the package tag alone: the `livekit-vX.Y.Z` checkout carries the shim,
 and lgx 0.4.2 or newer reuses the built runtime until the shim's files
 change. There is no Go module tag to cut, no coord to flip, and CI tests the
 working-tree shim as is. New packages with a shim should follow this model.
-livekit was the pilot, and `wails` (from wails-v0.2.0), `nrepl`, `sql`
+livekit was the pilot, and `wails` (from wails-v0.2.0), `nrepl`, `keyring`, `sql`
 (from sql-v0.3.0) and `postgres` (from postgres-v0.4.0) follow it; the existing `livekit/shim/v0.1.0`,
 `wails/shim/v0.1.0` and `sql/shim/v0.1.0` tags stay as history. The steps
 below apply to `duckdb` until it is moved over.
@@ -108,7 +109,7 @@ When `sql/` changed, release it before its dependents:
 3. Tag the four packages `<pkg>-vX.Y.Z` on that commit and push.
 
 **The `v0.0.0` let-go require** in `sql/shim/go.mod`,
-`wails/shim/go.mod`, `duckdb/shim/go.mod`, `livekit/shim/go.mod` and `nrepl/shim/go.mod` is deliberate. A shim has no let-go version of its
+`wails/shim/go.mod`, `duckdb/shim/go.mod`, `livekit/shim/go.mod`, `nrepl/shim/go.mod` and `keyring/shim/go.mod` is deliberate. A shim has no let-go version of its
 own: Go's minimal version selection resolves the placeholder to whatever
 the consumer's `:lg-version` pins, so the project's pin stays
 authoritative. A real version here would set a floor and silently bump an
