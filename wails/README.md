@@ -8,9 +8,10 @@ frontend. Your UI is HTML/CSS/JS; your application logic is let-go.
 v3.0.0-beta.16: a WKWebView window created from let-go, handlers answering
 frontend calls, a let-go map arriving as a JSON object, and a single-binary
 build. v0.2.0 moves to beta.30 and adds menus, dialogs, events from the
-frontend, window controls and resource-served assets. Its tests run in
-Wails' cgo-free server mode; the native side of the new pieces still needs
-a check on a desktop. The Linux GTK4/WebKitGTK window has never been run.
+frontend, window controls and resource-served assets. v0.4.0 moves to the
+stable Wails v3.0.0. Its tests run in Wails' cgo-free server mode; the
+native side of the new pieces still needs a check on a desktop. The Linux
+GTK4/WebKitGTK window has never been run.
 
 ## Requirements
 
@@ -40,7 +41,7 @@ a check on a desktop. The Linux GTK4/WebKitGTK window has never been run.
  :lg-runtime :built
  :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-wails {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-                                    :git/tag "wails-v0.3.0"
+                                    :git/tag "wails-v0.4.0"
                                     :deps/root "wails"}}}
 ```
 
