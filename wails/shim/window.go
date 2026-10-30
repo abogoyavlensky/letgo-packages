@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 
 // NewWindow opens a window. Same reasoning as New: the options struct is
 // assembled here from a let-go map.
-func NewWindow(app *application.App, opts vm.Value) *application.WebviewWindow {
+func NewWindow(app *application.App, opts vm.Value) (*application.WebviewWindow, error) {
 	o := application.WebviewWindowOptions{}
 	if s, ok := optString(opts, "title"); ok {
 		o.Title = s
@@ -36,7 +37,40 @@ func NewWindow(app *application.App, opts vm.Value) *application.WebviewWindow {
 		o.URL = s
 	}
 	o.Hidden = optBool(opts, "hidden")
-	return app.Window.NewWithOptions(o)
+	tb, err := macTitleBar(opts)
+	if err != nil {
+		return nil, err
+	}
+	o.Mac.TitleBar = tb
+	return app.Window.NewWithOptions(o), nil
+}
+
+// macTitleBar maps :mac-title-bar to one of Wails' title bar presets. With
+// a hidden one the page draws under the traffic lights, and an element
+// with the CSS --wails-draggable: drag moves the window. Only macOS uses
+// it. The value is a keyword or a string, with or without the colon.
+func macTitleBar(opts vm.Value) (application.MacTitleBar, error) {
+	v := opt(opts, "mac-title-bar")
+	if v == nil {
+		return application.MacTitleBarDefault, nil
+	}
+	name, ok := ToGo(v).(string)
+	switch strings.TrimPrefix(name, ":") {
+	case "default":
+		return application.MacTitleBarDefault, nil
+	case "hidden":
+		return application.MacTitleBarHidden, nil
+	case "hidden-inset":
+		return application.MacTitleBarHiddenInset, nil
+	case "hidden-inset-unified":
+		return application.MacTitleBarHiddenInsetUnified, nil
+	}
+	got := v.String()
+	if ok {
+		got = name
+	}
+	return application.MacTitleBar{}, fmt.Errorf(
+		"new-window: :mac-title-bar must be one of :default, :hidden, :hidden-inset, :hidden-inset-unified; got %q", got)
 }
 
 // The window controls are pass-throughs. Each Wails method already moves
