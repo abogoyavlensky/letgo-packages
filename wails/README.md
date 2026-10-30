@@ -41,7 +41,7 @@ GTK4/WebKitGTK window has never been run.
  :lg-runtime :built
  :lg-version "1.13.0"
  :deps {abogoyavlensky/letgo-wails {:git/url "https://github.com/abogoyavlensky/letgo-packages"
-                                    :git/tag "wails-v0.4.0"
+                                    :git/tag "wails-v0.5.0"
                                     :deps/root "wails"}}}
 ```
 
@@ -86,7 +86,7 @@ Options maps take keyword or string keys alike (`{:title "x"}` or
 | | |
 |---|---|
 | `(new-app opts)` | Build the application. `:name`, `:description`, `:assets` (resource prefix, preferred), `:assets-dir` (cwd-relative dir), `:quit-on-last-window-closed`, `:on-shutdown` (fn). |
-| `(new-window app opts)` | Open a window and return it. `:title`, `:width`, `:height`, `:min-width`, `:min-height`, `:url`, `:hidden`. |
+| `(new-window app opts)` | Open a window and return it. `:title`, `:width`, `:height`, `:min-width`, `:min-height`, `:url`, `:hidden`, `:mac-title-bar` (below). |
 | `(set-title! win s)` `(show! win)` `(hide! win)` `(close! win)` `(focus! win)` `(reload! win)` `(exec-js! win js)` | Window controls. Safe from any thread: Wails moves each onto the main thread. |
 | `(on-main! f)` | Run `f` on the main thread and wait, for anything else that must run there. |
 | `(handler! name f)` | Register `f` (a fn or a var) as the handler the frontend reaches by `name`. |
@@ -111,6 +111,20 @@ from disk on every request, so an edit shows on the next reload; after
 `lgx build` it reads the copy embedded in the binary. Prefer it to
 `:assets-dir`, which is relative to the working directory: a macOS `.app`
 started from Finder runs in `/`, and its window comes up blank.
+
+### Hidden title bar (macOS)
+
+`:mac-title-bar` picks one of Wails' title bar presets: `:default`,
+`:hidden`, `:hidden-inset` or `:hidden-inset-unified`. Anything else
+throws. With a hidden preset the page draws under the title bar, and the
+traffic lights float over its top-left corner, so keep controls out of
+that corner. An element with the CSS custom property
+`--wails-draggable: drag` moves the window; `@wailsio/runtime` handles it.
+Other platforms ignore the option.
+
+```clojure
+(w/new-window app {:title "My App" :mac-title-bar :hidden-inset})
+```
 
 ### Menus are data
 

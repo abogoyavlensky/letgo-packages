@@ -26,7 +26,10 @@
 (defn new-window
   "Open a window and return it. opts keys, keywords or strings, all
    optional: :title, :width, :height, :min-width, :min-height, :url (the
-   path to load, default /), :hidden (create it hidden; show! it later)."
+   path to load, default /), :hidden (create it hidden; show! it later),
+   :mac-title-bar (macOS only: :default, :hidden, :hidden-inset or
+   :hidden-inset-unified; a hidden one lets the page draw under the
+   traffic lights). An unknown :mac-title-bar throws."
   [app opts]
   (shim/NewWindow app opts))
 

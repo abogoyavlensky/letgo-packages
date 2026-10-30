@@ -4,6 +4,7 @@
 (ns wails.window-test
   (:require [wails.core :as w]
             [wails.test-app :as t]
+            [string :as str]
             [clojure.test :refer [deftest is]]))
 
 (deftest controls-are-callable
@@ -17,6 +18,20 @@
 (deftest new-window-takes-the-new-options
   (is (some? (w/new-window (t/app) {:title "second" :min-width 200
                                     :min-height 100 :hidden true}))))
+
+;; The title bar presets only change a macOS window; elsewhere they are
+;; accepted and ignored.
+(deftest new-window-takes-the-mac-title-bar-presets
+  (doseq [v [:default :hidden :hidden-inset :hidden-inset-unified "hidden-inset"]]
+    (is (some? (w/new-window (t/app) {:hidden true :mac-title-bar v})) (str v))))
+
+(defn- new-window-error [opts]
+  (try (w/new-window (t/app) opts) ""
+       (catch e (ex-message e))))
+
+(deftest new-window-refuses-an-unknown-mac-title-bar
+  (is (str/includes? (new-window-error {:hidden true :mac-title-bar :sideways}) ":mac-title-bar"))
+  (is (str/includes? (new-window-error {:hidden true :mac-title-bar 1}) ":mac-title-bar")))
 
 (deftest on-main-runs-the-fn
   (let [ran (promise)
