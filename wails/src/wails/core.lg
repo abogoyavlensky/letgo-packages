@@ -163,3 +163,56 @@
   "Stop the application."
   [app]
   (shim/Quit app))
+
+;; In-app updates over Wails' updater. The app calls updater-init! once,
+;; decides when to check and draws its own UI; the flow is check-update,
+;; download-update!, restart-to-update!. Before an update is installed the
+;; staged .app must satisfy the running app's designated requirement, so
+;; only an update signed like the installed copy goes in. Installing works
+;; for a Developer ID-signed .app on macOS; can-install-update says why
+;; not elsewhere.
+
+(defn- keywordize [m]
+  (when m (into {} (map (fn [[k v]] [(keyword k) v])) m)))
+
+(defn updater-init!
+  "Configure the updater for GitHub Releases. opts: :current-version
+   (\"1.2.3\", no v) and :repository (\"owner/repo\") are required;
+   :checksum-asset names a release asset of sha256sum lines
+   (\"checksums.txt\"); :base-url replaces https://api.github.com (a stub,
+   in tests). A second call does nothing: the first config wins."
+  [app opts]
+  (shim/UpdaterInit app opts)
+  nil)
+
+(defn check-update
+  "Ask GitHub for a release newer than the current version. Returns
+   {:version :name :url :published-at :size}, or nil when up to date.
+   Throws when the check fails (offline, rate-limited, no asset for this
+   platform). Gives up after 20 s."
+  [app]
+  (keywordize (shim/UpdaterCheck app)))
+
+(defn download-update!
+  "Download the release the last check-update found, verify it and stage
+   it. Blocks until done; the frontend gets wails:updater:download-progress
+   events ({written, total, rate}) meanwhile. Throws if the download, its
+   checksum or the signer check fails. Returns nil."
+  [app]
+  (shim/UpdaterDownload app)
+  nil)
+
+(defn restart-to-update!
+  "Quit and let Wails' helper swap in the staged update and start it.
+   Throws unless download-update! has verified one. The app's own shutdown
+   (its :on-shutdown) runs as on any quit."
+  [app]
+  (shim/UpdaterRestart app)
+  nil)
+
+(defn can-install-update
+  "Whether this copy can replace itself: {:ok true}, or {:ok false :reason
+   \"...\"}. True only for a macOS .app signed with an Apple-issued
+   certificate, in a folder this user can write to."
+  []
+  (keywordize (shim/UpdaterCanInstall)))
