@@ -101,6 +101,7 @@ Options maps take keyword or string keys alike (`{:title "x"}` or
 | `(dev-server-url)` | The frontend dev server the assets come from (`FRONTEND_DEVSERVER_URL`), or `nil`. Always `nil` in a `production` build. |
 | `(run! app)` | Block on the event loop. Call it from the entry fn, on the main thread. Returns the error as a value, `nil` on a clean exit. |
 | `(quit! app)` | Stop the application. |
+| `(updater-init! app opts)` `(check-update app)` `(download-update! app)` `(restart-to-update! app)` `(can-install-update)` | In-app updates from GitHub Releases (below). |
 | `bridge-method` | The fully-qualified name the frontend passes to `Call.ByName`. |
 
 ### The frontend comes from resources
@@ -125,6 +126,43 @@ Other platforms ignore the option.
 ```clojure
 (w/new-window app {:title "My App" :mac-title-bar :hidden-inset})
 ```
+
+### Updates
+
+Wails' own updater (`pkg/updater`) does the work: it finds the newest
+GitHub release, downloads the asset for this platform with progress,
+checks it against a `sha256sum`-style checksums asset, swaps the `.app`
+with a backup, and relaunches. The app decides when to check and draws
+its own UI:
+
+```clojure
+(w/updater-init! app {:current-version "1.2.0" :repository "me/my-app"
+                      :checksum-asset "checksums.txt"})
+(when-let [rel (w/check-update app)]       ; {:version :name :url :published-at :size}
+  (when (:ok (w/can-install-update))
+    (w/download-update! app)               ; blocks; wails:updater:download-progress events
+    (w/restart-to-update! app)))           ; quits; the helper swaps and relaunches
+```
+
+What the package adds on top:
+
+- **A signer check.** Wails' codesign pass only asks whether a bundle's
+  signature is intact, and lets an unsigned one through. Before
+  `restart-to-update!` will install anything, the staged `.app` must
+  satisfy the running app's designated requirement (`codesign -d -r-`),
+  so only an update signed like the installed copy goes in.
+- **A required checksum.** With `:checksum-asset` set, a release whose
+  checksums asset is missing or has no line for the asset is refused;
+  Wails alone would install it unchecked.
+- **Helper mode first.** Wails restarts through a helper: the same binary,
+  started with `WAILS_UPDATER_HELPER*` variables. The shim's Go `init()`
+  handles that before any let-go code runs, so the helper never opens the
+  app's database or anything else.
+
+`can-install-update` is `{:ok true}` only for a macOS `.app` signed with
+an Apple-issued certificate (Developer ID; ad hoc doesn't count) in a
+folder the user can write to; otherwise it carries a `:reason`. A second
+`updater-init!` is a no-op, so an app can restart its system in-process.
 
 ### Menus are data
 
@@ -233,6 +271,7 @@ wails/
 │   ├── window.go    windows, their controls, on-main!, the asset watcher
 │   ├── menu.go      the menu spec builder
 │   ├── dialogs.go   file and message dialogs
+│   ├── updater.go   in-app updates over Wails' updater, the signer check
 │   ├── assets.go    the frontend served from resources
 │   ├── devserver*.go  FRONTEND_DEVSERVER_URL, off in production builds
 │   ├── callback.go  invoking let-go from Wails goroutines

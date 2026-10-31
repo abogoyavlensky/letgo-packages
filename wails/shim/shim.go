@@ -32,6 +32,7 @@ import (
 
 	"github.com/nooga/let-go/pkg/rt"
 	"github.com/nooga/let-go/pkg/vm"
+	"github.com/wailsapp/wails/v3/pkg/updater"
 )
 
 // BridgeMethod is the fully-qualified name the frontend calls. Exported
@@ -106,7 +107,13 @@ func Register(name string, fn vm.Fn) { handlers.Store(name, fn) }
 // drains its installer queue during its own package init, and Go runs an
 // imported package's init first, so anything queued from here would
 // arrive after the drain and silently never run.
+//
+// A process that Wails' updater started as its restart helper swaps the
+// bundle, relaunches the app and exits right here, before any let-go code
+// runs. Wails would do the same inside application.New, but an app
+// usually opens its state (a database, say) before it gets there.
 func init() {
+	updater.HandleHelperMode()
 	ns := vm.NewNamespace("wails.shim")
 	ns.Def("BridgeMethod", vm.MustBox(BridgeMethod))
 	ns.Def("New", vm.MustBox(New))
@@ -132,5 +139,10 @@ func init() {
 	ns.Def("DataDir", vm.MustBox(DataDir))
 	ns.Def("WatchAssets", vm.MustBox(WatchAssets))
 	ns.Def("DevServerURL", vm.MustBox(DevServerURL))
+	ns.Def("UpdaterInit", vm.MustBox(UpdaterInit))
+	ns.Def("UpdaterCheck", vm.MustBox(UpdaterCheck))
+	ns.Def("UpdaterDownload", vm.MustBox(UpdaterDownload))
+	ns.Def("UpdaterRestart", vm.MustBox(UpdaterRestart))
+	ns.Def("UpdaterCanInstall", vm.MustBox(UpdaterCanInstall))
 	rt.RegisterNS(ns)
 }

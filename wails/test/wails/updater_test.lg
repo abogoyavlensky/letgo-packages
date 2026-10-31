@@ -1,0 +1,97 @@
+;; The updater against a stub GitHub. Wails keeps one Updater per process
+;; and configures it once, so every test shares current version 1.0.0 and
+;; changes what the stub serves instead.
+(ns wails.updater-test
+  (:require [wails.core :as w]
+            [wails.test-app :as t]
+            [json :as json]
+            [string :as str]
+            [clojure.test :refer [deftest is]]))
+
+;; A plain file, not a zip: Wails stages it as it is.
+(def ^:private asset (str "app_2.0.0_" (os/os-name) "_" (os/arch)))
+(def ^:private payload "the new app")
+
+;; What the stub serves: :tag and the checksum it lists.
+(def ^:private served (atom {:tag "v2.0.0" :sum (hash/sha256 payload)}))
+
+(defn- release [base]
+  {:tag_name (:tag @served)
+   :name "App 2.0.0"
+   :html_url "https://example.test/releases/v2.0.0"
+   :published_at "2026-11-01T10:00:00Z"
+   :assets [{:name asset :size (count payload)
+             :browser_download_url (str base "/dl/" asset)}
+            {:name "checksums.txt" :size 100
+             :browser_download_url (str base "/dl/checksums.txt")}]})
+
+(defn- handler [base]
+  (fn [{:keys [uri]}]
+    (cond
+      (= uri "/repos/o/r/releases/latest")
+      {:status 200 :headers {"content-type" "application/json"}
+       :body (json/write-json (release base))}
+      (= uri (str "/dl/" asset)) {:status 200 :body payload}
+      (= uri "/dl/checksums.txt") {:status 200 :body (if-let [sum (:sum @served)]
+                                                        (str sum "  " asset "\n")
+                                                        "")}
+      :else {:status 404 :body "not found"})))
+
+(defonce ^:private stub
+  (delay
+    (let [base* (atom nil)
+          s (http/start (fn [req] ((handler @base*) req)) "127.0.0.1:0")
+          base (str "http://127.0.0.1:" (:port s))]
+      (reset! base* base)
+      (w/updater-init! (t/app) {:current-version "1.0.0" :repository "o/r"
+                                :checksum-asset "checksums.txt" :base-url base})
+      base)))
+
+(defn- serving! [m] @stub (reset! served (merge {:tag "v2.0.0" :sum (hash/sha256 payload)} m)))
+
+(deftest a-newer-release-comes-back-as-a-map
+  (serving! {})
+  (let [rel (w/check-update (t/app))]
+    (is (= "2.0.0" (:version rel)))
+    (is (= "App 2.0.0" (:name rel)))
+    (is (= "https://example.test/releases/v2.0.0" (:url rel)))
+    (is (= "2026-11-01T10:00:00Z" (:published-at rel)))
+    (is (= (count payload) (:size rel)))))
+
+(deftest the-current-version-is-up-to-date
+  (serving! {:tag "v1.0.0"})
+  (is (nil? (w/check-update (t/app)))))
+
+(deftest a-second-init-is-a-no-op
+  @stub
+  (is (nil? (w/updater-init! (t/app) {:current-version "9.9.9" :repository "x/y"})))
+  (serving! {})
+  (is (= "2.0.0" (:version (w/check-update (t/app)))) "the first config still applies"))
+
+(deftest download-stages-a-verified-release
+  (serving! {})
+  (w/check-update (t/app))
+  (is (nil? (w/download-update! (t/app)))))
+
+(deftest a-wrong-checksum-fails-the-download
+  (serving! {:sum (hash/sha256 "something else")})
+  (w/check-update (t/app))
+  (let [e (try (w/download-update! (t/app)) nil (catch e e))]
+    (is (some? e))
+    (is (str/includes? (str (ex-message e)) "digest") (str "message: " (ex-message e)))))
+
+(deftest restart-refuses-without-a-verified-download
+  (serving! {:sum (hash/sha256 "something else")})
+  (w/check-update (t/app))
+  (try (w/download-update! (t/app)) (catch e nil))
+  (is (thrown? Exception (w/restart-to-update! (t/app)))))
+
+(deftest only-macos-installs
+  (when-not (= "darwin" (os/os-name))
+    (is (= {:ok false :reason "updates install only on macOS"} (w/can-install-update)))))
+
+(deftest a-release-without-a-checksum-is-refused
+  (serving! {:sum nil})
+  (let [e (try (w/check-update (t/app)) nil (catch e e))]
+    (is (some? e))
+    (is (str/includes? (str (ex-message e)) "no checksum") (str "message: " (ex-message e)))))
