@@ -103,8 +103,10 @@ func UpdaterInit(app *application.App, opts vm.Value) (vm.Value, error) {
 func UpdaterCheck(app *application.App) (vm.Value, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
-	rel, err := app.Updater.Check(ctx)
+	// Held across Check: Wails emits update-available from inside it, and a
+	// listener that starts a download must find offered already set.
 	flowMu.Lock()
+	rel, err := app.Updater.Check(ctx)
 	offered = err == nil && rel != nil
 	flowMu.Unlock()
 	if err != nil || rel == nil {
