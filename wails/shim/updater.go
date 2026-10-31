@@ -38,17 +38,35 @@ const (
 
 // verified is the staged path that passed the signer check. Restart
 // refuses anything else, so a download that failed the check can never be
-// swapped in.
+// swapped in. flowMu is held for a whole download and a whole restart
+// handoff, so a download cannot replace the staged payload between the
+// restart's check and Wails reading it.
+//
+// offered is whether the last check returned a release. Wails keeps its
+// pending release across a check that fails or finds nothing; download
+// takes only what the last check offered.
 var (
-	verifiedMu sync.Mutex
-	verified   string
+	flowMu   sync.Mutex
+	verified string
+	offered  bool
 )
 
-// requireDigest is set when the app names a checksum asset. Wails' GitHub
-// provider skips verification when the sidecar is missing or has no line
-// for the asset; with a checksum asset configured, that release is
-// refused instead.
-var requireDigest bool
+// digestRequired wraps the GitHub provider when the app names a checksum
+// asset. The provider alone skips verification when the sidecar is missing
+// or has no line for the asset; this refuses that release inside Check, so
+// Wails never stores it as the pending one.
+type digestRequired struct{ *github.Provider }
+
+func (d digestRequired) Check(ctx context.Context, req updater.CheckRequest) (*updater.Release, error) {
+	rel, err := d.Provider.Check(ctx, req)
+	if err != nil || rel == nil {
+		return rel, err
+	}
+	if rel.Verification == nil || len(rel.Verification.Digest) == 0 {
+		return nil, fmt.Errorf("release %s lists no checksum for %s", rel.Version, rel.Artifact.Filename)
+	}
+	return rel, nil
+}
 
 // UpdaterInit configures app.Updater. opts: :current-version and
 // :repository (required), :checksum-asset, :base-url (a stand-in for
@@ -65,16 +83,17 @@ func UpdaterInit(app *application.App, opts vm.Value) (vm.Value, error) {
 	if err != nil {
 		return vm.NIL, err
 	}
+	var provider updater.Provider = p
+	if cfg.ChecksumAsset != "" {
+		provider = digestRequired{p}
+	}
 	err = app.Updater.Init(updater.Config{
 		CurrentVersion: version,
-		Providers:      []updater.Provider{p},
+		Providers:      []updater.Provider{provider},
 		Window:         updater.WindowNone,
 	})
 	if errors.Is(err, updater.ErrAlreadyConfigured) {
 		return vm.NIL, nil
-	}
-	if err == nil {
-		requireDigest = cfg.ChecksumAsset != ""
 	}
 	return vm.NIL, err
 }
@@ -85,11 +104,11 @@ func UpdaterCheck(app *application.App) (vm.Value, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
 	rel, err := app.Updater.Check(ctx)
+	flowMu.Lock()
+	offered = err == nil && rel != nil
+	flowMu.Unlock()
 	if err != nil || rel == nil {
 		return vm.NIL, err
-	}
-	if requireDigest && (rel.Verification == nil || len(rel.Verification.Digest) == 0) {
-		return vm.NIL, fmt.Errorf("release %s lists no checksum for %s", rel.Version, rel.Artifact.Filename)
 	}
 	url, _ := rel.Metadata["github.release.htmlURL"].(string)
 	published := ""
@@ -112,9 +131,12 @@ func UpdaterCheck(app *application.App) (vm.Value, error) {
 // the signer check is deleted and the error returned. Elsewhere there is
 // no signer to check, and UpdaterCanInstall is false anyway.
 func UpdaterDownload(app *application.App) (vm.Value, error) {
-	verifiedMu.Lock()
+	flowMu.Lock()
+	defer flowMu.Unlock()
 	verified = ""
-	verifiedMu.Unlock()
+	if !offered {
+		return vm.NIL, errors.New("no update to download: the last check found none")
+	}
 	if err := app.Updater.DownloadAndInstall(context.Background()); err != nil {
 		return vm.NIL, err
 	}
@@ -125,9 +147,7 @@ func UpdaterDownload(app *application.App) (vm.Value, error) {
 			return vm.NIL, err
 		}
 	}
-	verifiedMu.Lock()
 	verified = staged
-	verifiedMu.Unlock()
 	return vm.NIL, nil
 }
 
@@ -135,10 +155,9 @@ func UpdaterDownload(app *application.App) (vm.Value, error) {
 // the helper swaps the bundle once this process has exited and starts the
 // new one.
 func UpdaterRestart(app *application.App) (vm.Value, error) {
-	verifiedMu.Lock()
-	ok := verified != "" && verified == app.Updater.DownloadedPath()
-	verifiedMu.Unlock()
-	if !ok {
+	flowMu.Lock()
+	defer flowMu.Unlock()
+	if verified == "" || verified != app.Updater.DownloadedPath() {
 		return vm.NIL, errors.New("no verified update to install")
 	}
 	return vm.NIL, app.Updater.Restart(context.Background())

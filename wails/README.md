@@ -153,7 +153,8 @@ What the package adds on top:
   so only an update signed like the installed copy goes in.
 - **A required checksum.** With `:checksum-asset` set, a release whose
   checksums asset is missing or has no line for the asset is refused;
-  Wails alone would install it unchecked.
+  Wails alone would install it unchecked. `download-update!` takes only
+  the release the last `check-update` returned.
 - **Helper mode first.** Wails restarts through a helper: the same binary,
   started with `WAILS_UPDATER_HELPER*` variables. The shim's Go `init()`
   handles that before any let-go code runs, so the helper never opens the

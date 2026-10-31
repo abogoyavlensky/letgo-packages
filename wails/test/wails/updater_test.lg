@@ -71,7 +71,14 @@
 (deftest download-stages-a-verified-release
   (serving! {})
   (w/check-update (t/app))
-  (is (nil? (w/download-update! (t/app)))))
+  (if (= "darwin" (os/os-name))
+    ;; The test runtime is no .app and the payload is unsigned: on macOS the
+    ;; signer check has to refuse it.
+    (let [e (try (w/download-update! (t/app)) nil (catch e e))]
+      (is (some? e))
+      (is (str/includes? (str (ex-message e)) "not running from a .app bundle")
+          (str "message: " (ex-message e))))
+    (is (nil? (w/download-update! (t/app))))))
 
 (deftest a-wrong-checksum-fails-the-download
   (serving! {:sum (hash/sha256 "something else")})
@@ -94,4 +101,6 @@
   (serving! {:sum nil})
   (let [e (try (w/check-update (t/app)) nil (catch e e))]
     (is (some? e))
-    (is (str/includes? (str (ex-message e)) "no checksum") (str "message: " (ex-message e)))))
+    (is (str/includes? (str (ex-message e)) "no checksum") (str "message: " (ex-message e))))
+  (is (thrown? Exception (w/download-update! (t/app)))
+      "a refused release is not left pending for a download"))
