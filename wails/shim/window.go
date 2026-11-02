@@ -49,6 +49,9 @@ func NewWindow(app *application.App, opts vm.Value) (*application.WebviewWindow,
 // a hidden one the page draws under the traffic lights, and an element
 // with the CSS --wails-draggable: drag moves the window. Only macOS uses
 // it. The value is a keyword or a string, with or without the colon.
+// :hidden-inset-compact is the unified preset with AppKit's compact
+// toolbar: a lower band than unified's, with the lights centred in it.
+// Wails has the style but no preset for it.
 func macTitleBar(opts vm.Value) (application.MacTitleBar, error) {
 	v := opt(opts, "mac-title-bar")
 	if v == nil {
@@ -64,13 +67,17 @@ func macTitleBar(opts vm.Value) (application.MacTitleBar, error) {
 		return application.MacTitleBarHiddenInset, nil
 	case "hidden-inset-unified":
 		return application.MacTitleBarHiddenInsetUnified, nil
+	case "hidden-inset-compact":
+		tb := application.MacTitleBarHiddenInsetUnified
+		tb.ToolbarStyle = application.MacToolbarStyleUnifiedCompact
+		return tb, nil
 	}
 	got := v.String()
 	if ok {
 		got = name
 	}
 	return application.MacTitleBar{}, fmt.Errorf(
-		"new-window: :mac-title-bar must be one of :default, :hidden, :hidden-inset, :hidden-inset-unified; got %q", got)
+		"new-window: :mac-title-bar must be one of :default, :hidden, :hidden-inset, :hidden-inset-unified, :hidden-inset-compact; got %q", got)
 }
 
 // The window controls are pass-throughs. Each Wails method already moves

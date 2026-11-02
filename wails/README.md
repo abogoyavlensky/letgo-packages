@@ -116,8 +116,11 @@ started from Finder runs in `/`, and its window comes up blank.
 ### Hidden title bar (macOS)
 
 `:mac-title-bar` picks one of Wails' title bar presets: `:default`,
-`:hidden`, `:hidden-inset` or `:hidden-inset-unified`. Anything else
-throws. With a hidden preset the page draws under the title bar, and the
+`:hidden`, `:hidden-inset` or `:hidden-inset-unified`, or
+`:hidden-inset-compact`: the unified one with AppKit's compact toolbar
+style, a lower band than unified's. Anything else throws. The inset
+presets add an empty toolbar, and macOS centres the traffic lights in its
+band: size a top bar to the band to have them centred in it. With a hidden preset the page draws under the title bar, and the
 traffic lights float over its top-left corner, so keep controls out of
 that corner. An element with the CSS custom property
 `--wails-draggable: drag` moves the window; `@wailsio/runtime` handles it.
