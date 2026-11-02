@@ -22,7 +22,8 @@
 ;; The title bar presets only change a macOS window; elsewhere they are
 ;; accepted and ignored.
 (deftest new-window-takes-the-mac-title-bar-presets
-  (doseq [v [:default :hidden :hidden-inset :hidden-inset-unified "hidden-inset"]]
+  (doseq [v [:default :hidden :hidden-inset :hidden-inset-unified :hidden-inset-compact
+             "hidden-inset"]]
     (is (some? (w/new-window (t/app) {:hidden true :mac-title-bar v})) (str v))))
 
 (defn- new-window-error [opts]
