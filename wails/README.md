@@ -192,8 +192,24 @@ Handler arguments and event data arrive as let-go values: objects as maps
 with string keys, arrays as vectors, whole numbers as ints. Return values
 are lowered to JSON: a map becomes an object, a vector an array, a keyword
 its name without the colon, `nil` becomes `null`. A string result reaches
-the frontend as the string. Throwing from a handler rejects the frontend's
-promise with the exception message.
+the frontend as the string.
+
+Throwing from a handler rejects the frontend's promise. For an
+`ex-info`, the error's `message` is the ex-info's message, and its
+`cause` is the ex-info's data, lowered the same way as a return value:
+
+```clojure
+(throw (ex-info "Not found" {:id 7 :retry true}))
+```
+
+```ts
+try { await Call.ByName(bridge, "load", [7]); }
+catch (e) { e.message; /* "Not found" */ e.cause; /* {id: 7, retry: true} */ }
+```
+
+Data that does not encode as JSON (a NaN, say) arrives as `null`; the
+message still does. Any other exception keeps its full text and no data.
+The data goes to the frontend as is, so keep secrets out of it.
 
 ### Callbacks and threads
 
