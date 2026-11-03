@@ -26,6 +26,7 @@
 package shim
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -75,18 +76,44 @@ func (b *Bridge) Call(name string, args []any) (any, error) {
 	return ToGo(res), nil
 }
 
+// handlerErr is a thrown ex-info as the frontend receives it: Error() is
+// the rejected promise's message, and Wails marshals the value itself to
+// JSON as the call error's cause, so the ex-info's data reaches the
+// frontend converted the way handler results are.
+type handlerErr struct {
+	msg  string
+	data *vm.PersistentMap
+}
+
+func (e *handlerErr) Error() string { return e.msg }
+
+// MarshalJSON is the error's cause: the ex-info's data, {} when it has
+// none, and null when the data does not encode (a NaN, say), so the
+// message still arrives.
+func (e *handlerErr) MarshalJSON() ([]byte, error) {
+	if e.data == nil {
+		return []byte("{}"), nil
+	}
+	b, err := json.Marshal(ToGo(e.data))
+	if err != nil {
+		return []byte("null"), nil
+	}
+	return b, nil
+}
+
 // handlerError is what the frontend's rejected promise carries. A handler
-// that throws (ex-info "a task needs a title" {}) reaches Go wrapped in the
-// VM's call chain ("ExecutionError: calling title! caused by ..."); the
-// frontend wants the message the handler wrote, so unwrap to the thrown
-// value. Anything else - a Go error, a VM fault - keeps its full text.
+// that throws (ex-info "a task needs a title" {:field :title}) reaches Go
+// wrapped in the VM's call chain ("ExecutionError: calling title! caused
+// by ..."); the frontend wants the message the handler wrote and its data,
+// so unwrap to the thrown value. Anything else - a Go error, a VM fault -
+// keeps its full text.
 func handlerError(err error) error {
 	// The VM links its errors through GetCause, not Unwrap, so errors.As
 	// does not see the thrown value; walk the chain by hand.
 	for e := err; e != nil; {
 		if te, ok := e.(*vm.ThrownError); ok {
 			if ei, ok := te.Value.(*vm.ExInfo); ok {
-				return errors.New(ei.Message())
+				return &handlerErr{msg: ei.Message(), data: ei.Data()}
 			}
 			return errors.New(te.Value.String())
 		}

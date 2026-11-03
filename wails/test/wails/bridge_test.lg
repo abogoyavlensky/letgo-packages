@@ -36,6 +36,27 @@
     (is (str/includes? (:body r) "kaboom"))
     (is (not (str/includes? (:body r) "caused by")))))
 
+(deftest a-thrown-ex-info-carries-its-data
+  ;; The data arrives as the call error's cause, converted as results are.
+  (w/handler! "lost" (fn [] (throw (ex-info "kaboom" {:x 1 :lost {:not-run true}}))))
+  (let [r (t/call "lost")]
+    (is (not= 200 (:status r)))
+    (is (str/includes? (get-in r [:json "message"]) "kaboom"))
+    (is (= {"x" 1 "lost" {"not-run" true}} (get-in r [:json "cause"])))))
+
+(deftest unencodable-data-still-carries-the-message
+  ;; JSON has no NaN: the data cannot be encoded, the message still arrives.
+  (w/handler! "nan" (fn [] (throw (ex-info "no number" {:x (/ 0.0 0.0)}))))
+  (let [r (t/call "nan")]
+    (is (str/includes? (get-in r [:json "message"]) "no number"))
+    (is (nil? (get-in r [:json "cause"])))))
+
+(deftest nil-data-is-an-empty-cause
+  (w/handler! "nil-data" (fn [] (throw (ex-info "bare" {}))))
+  (let [r (t/call "nil-data")]
+    (is (str/includes? (get-in r [:json "message"]) "bare"))
+    (is (= {} (get-in r [:json "cause"])))))
+
 (deftest an-unknown-name-is-an-error
   (let [r (t/call "nope")]
     (is (not= 200 (:status r)))
