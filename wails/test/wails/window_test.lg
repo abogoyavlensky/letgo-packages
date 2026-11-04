@@ -34,6 +34,26 @@
   (is (str/includes? (new-window-error {:hidden true :mac-title-bar :sideways}) ":mac-title-bar"))
   (is (str/includes? (new-window-error {:hidden true :mac-title-bar 1}) ":mac-title-bar")))
 
+(deftest new-window-takes-the-start-states
+  (doseq [v [:normal :maximised :fullscreen "maximised"]]
+    (is (some? (w/new-window (t/app) {:hidden true :start-state v})) (str v))))
+
+(deftest new-window-refuses-an-unknown-start-state
+  (is (str/includes? (new-window-error {:hidden true :start-state :sideways}) ":start-state"))
+  (is (str/includes? (new-window-error {:hidden true :start-state 1}) ":start-state")))
+
+;; Server mode has no webview: this proves the fn is wired and takes a
+;; float or an integer.
+(deftest set-zoom-is-callable
+  (let [win (t/win)]
+    (is (nil? (w/set-zoom! win 1.25)))
+    (is (nil? (w/set-zoom! win 1)))))
+
+(deftest a-server-mode-window-is-neither-maximised-nor-fullscreen
+  (let [win (t/win)]
+    (is (false? (w/maximised? win)))
+    (is (false? (w/fullscreen? win)))))
+
 (deftest on-main-runs-the-fn
   (let [ran (promise)
         done (future (w/on-main! (fn [] (deliver ran :yes))))]

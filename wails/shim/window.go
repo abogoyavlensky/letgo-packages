@@ -42,6 +42,11 @@ func NewWindow(app *application.App, opts vm.Value) (*application.WebviewWindow,
 		return nil, err
 	}
 	o.Mac.TitleBar = tb
+	state, err := startState(opts)
+	if err != nil {
+		return nil, err
+	}
+	o.StartState = state
 	return app.Window.NewWithOptions(o), nil
 }
 
@@ -80,6 +85,32 @@ func macTitleBar(opts vm.Value) (application.MacTitleBar, error) {
 		"new-window: :mac-title-bar must be one of :default, :hidden, :hidden-inset, :hidden-inset-unified, :hidden-inset-compact; got %q", got)
 }
 
+// startState maps :start-state to the state a window opens in. Wails
+// applies it as the window is created, on every platform. The value is a
+// keyword or a string, with or without the colon. :minimised is left out
+// until something needs it.
+func startState(opts vm.Value) (application.WindowState, error) {
+	v := opt(opts, "start-state")
+	if v == nil {
+		return application.WindowStateNormal, nil
+	}
+	name, ok := ToGo(v).(string)
+	switch strings.TrimPrefix(name, ":") {
+	case "normal":
+		return application.WindowStateNormal, nil
+	case "maximised":
+		return application.WindowStateMaximised, nil
+	case "fullscreen":
+		return application.WindowStateFullscreen, nil
+	}
+	got := v.String()
+	if ok {
+		got = name
+	}
+	return application.WindowStateNormal, fmt.Errorf(
+		"new-window: :start-state must be one of :normal, :maximised, :fullscreen; got %q", got)
+}
+
 // The window controls are pass-throughs. Each Wails method already moves
 // its platform call onto the main thread (InvokeSync inside), so they are
 // safe from any goroutine - a handler, a menu click, an nREPL eval. They
@@ -93,6 +124,12 @@ func Close(w *application.WebviewWindow)                  { w.Close() }
 func Focus(w *application.WebviewWindow)                  { w.Focus() }
 func Reload(w *application.WebviewWindow)                 { w.Reload() }
 func ExecJS(w *application.WebviewWindow, js string)      { w.ExecJS(js) }
+
+// SetZoom is the page zoom, 1.0 for 100%. Wails clamps it to at least 1.0.
+func SetZoom(w *application.WebviewWindow, level float64) { w.SetZoom(level) }
+
+func IsMaximised(w *application.WebviewWindow) bool  { return w.IsMaximised() }
+func IsFullscreen(w *application.WebviewWindow) bool { return w.IsFullscreen() }
 
 // InvokeSync runs fn on the main thread and waits for it. Wails' own
 // methods hop there by themselves; this is for anything else that must

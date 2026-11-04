@@ -86,8 +86,10 @@ Options maps take keyword or string keys alike (`{:title "x"}` or
 | | |
 |---|---|
 | `(new-app opts)` | Build the application. `:name`, `:description`, `:assets` (resource prefix, preferred), `:assets-dir` (cwd-relative dir), `:quit-on-last-window-closed`, `:on-shutdown` (fn). |
-| `(new-window app opts)` | Open a window and return it. `:title`, `:width`, `:height`, `:min-width`, `:min-height`, `:url`, `:hidden`, `:mac-title-bar` (below). |
+| `(new-window app opts)` | Open a window and return it. `:title`, `:width`, `:height`, `:min-width`, `:min-height`, `:url`, `:hidden`, `:mac-title-bar` (below), `:start-state` (`:normal`, `:maximised` or `:fullscreen`, the state it opens in). |
 | `(set-title! win s)` `(show! win)` `(hide! win)` `(close! win)` `(focus! win)` `(reload! win)` `(exec-js! win js)` | Window controls. Safe from any thread: Wails moves each onto the main thread. |
+| `(set-zoom! win level)` | Zoom the whole page: 1.0 is 100%. Wails clamps it to at least 1.0. Call it once the window runs: before `run!`, macOS never applies the level. |
+| `(maximised? win)` `(fullscreen? win)` | The window's state. False once the window is gone, and always in server mode. |
 | `(on-main! f)` | Run `f` on the main thread and wait, for anything else that must run there. |
 | `(handler! name f)` | Register `f` (a fn or a var) as the handler the frontend reaches by `name`. |
 | `(emit! app name data)` | Send an event to the frontend. |

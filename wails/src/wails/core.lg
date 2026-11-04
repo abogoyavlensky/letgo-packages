@@ -29,7 +29,9 @@
    path to load, default /), :hidden (create it hidden; show! it later),
    :mac-title-bar (macOS only: :default, :hidden, :hidden-inset,
    :hidden-inset-unified or :hidden-inset-compact; a hidden one lets the
-   page draw under the traffic lights). An unknown :mac-title-bar throws."
+   page draw under the traffic lights), :start-state (:normal, :maximised
+   or :fullscreen, the state it opens in). An unknown :mac-title-bar or
+   :start-state throws."
   [app opts]
   (shim/NewWindow app opts))
 
@@ -43,6 +45,27 @@
 (defn focus! "Focus the window." [win] (shim/Focus win) nil)
 (defn reload! "Reload the window's page." [win] (shim/Reload win) nil)
 (defn exec-js! "Run JavaScript in the window's page." [win js] (shim/ExecJS win js) nil)
+
+(defn set-zoom!
+  "Zoom the window's page, the whole of it: 1.0 is 100%, 1.25 is 125%.
+   Wails clamps it to at least 1.0. Call it once the window runs: before
+   run!, macOS never applies the level."
+  [win level]
+  (shim/SetZoom win (double level))
+  nil)
+
+(defn maximised?
+  "Whether the window is maximised (zoomed, on macOS). False once the
+   window is gone, and always in server mode."
+  [win]
+  (shim/IsMaximised win))
+
+(defn fullscreen?
+  "Whether the window is fullscreen. False once the window is gone, and
+   always in server mode. A fullscreen window may also report maximised?,
+   so check this first."
+  [win]
+  (shim/IsFullscreen win))
 
 (defn on-main!
   "Run `f`, a fn of no args, on the main thread and wait for it. The window
