@@ -22,8 +22,8 @@
 //
 //   - let-go cannot build a context.Context, and cancellation needs one.
 //     Ctx carries a cancellable context a caller can hold and cancel, and
-//     QueryCtx, ExecCtx and Conn take it (or context.Background) on the
-//     caller's behalf.
+//     QueryCtx, ExecCtx and ConnCtx take it (Query, Exec and Conn use
+//     context.Background) on the caller's behalf.
 package shim
 
 import (
@@ -113,6 +113,13 @@ func Conn(db *sql.DB) (*sql.Conn, error) {
 	return db.Conn(context.Background())
 }
 
+// ConnCtx is Conn under a cancellable Ctx: cancelling ctx stops the wait
+// for a connection, the dial included. ctx bounds only the taking; the
+// session it returns outlives it.
+func ConnCtx(db *sql.DB, ctx *Ctx) (*sql.Conn, error) {
+	return db.Conn(ctx.ctx)
+}
+
 // ColumnTypeNames returns each column's database type name ("INTEGER",
 // "TEXT", "INT8", ...), in column order; "" where the driver does not
 // know it.
@@ -142,6 +149,7 @@ func init() {
 	ns.Def("QueryCtx", vm.MustBox(QueryCtx))
 	ns.Def("ExecCtx", vm.MustBox(ExecCtx))
 	ns.Def("Conn", vm.MustBox(Conn))
+	ns.Def("ConnCtx", vm.MustBox(ConnCtx))
 	ns.Def("ColumnTypeNames", vm.MustBox(ColumnTypeNames))
 	rt.RegisterNS(ns)
 }

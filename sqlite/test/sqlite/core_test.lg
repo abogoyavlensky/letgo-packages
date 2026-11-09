@@ -122,3 +122,24 @@
     (.Cancel ctx)
     (.Cancel ctx)
     (is (.Canceled ctx))))
+
+;; The ctx bounds only taking the session: once taken, it outlives it.
+(deftest conn-ctx-session-outlives-its-ctx
+  (with-db
+    (fn [conn]
+      (let [ctx (shim/NewCtx)
+            session (shim/ConnCtx (:sql/handle conn) ctx)]
+        (try
+          (.Cancel ctx)
+          (shim/Exec session "create temp table t (x integer)" [])
+          (shim/Exec session "insert into t (x) values (?)" [1])
+          (is (= [{:x 1}] (sql/execute! {:sql/handle session} ["select x from t"])))
+          (finally (.Close session)))))))
+
+(deftest conn-ctx-refuses-a-canceled-ctx
+  (with-db
+    (fn [conn]
+      (let [ctx (shim/NewCtx)]
+        (.Cancel ctx)
+        (is (str/includes? (str (thrown-message #(.Close (shim/ConnCtx (:sql/handle conn) ctx))))
+                           "canceled"))))))

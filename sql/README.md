@@ -135,6 +135,7 @@ methods:
 | `(shim/NewCtx)` | A cancellable context. `(.Cancel ctx)` is idempotent; `(.Canceled ctx)` reports whether it was called. Create it before the query starts so a cancel can arrive before the first row. |
 | `(shim/QueryCtx c ctx q params)` `(shim/ExecCtx c ctx q params)` | `Query`/`Exec` under `ctx`. `c` is a `*sql.DB`, `*sql.Tx` or `*sql.Conn`. |
 | `(shim/Conn db)` | Take a session from the pool. Session state (`BEGIN`, temp tables, `SET`) stays on it across calls. Close it to return it. |
+| `(shim/ConnCtx db ctx)` | `Conn` under `ctx`: a cancel stops the wait for a connection, the dial included. The session outlives `ctx`. |
 | `(shim/ColumnTypeNames rows)` | Each column's database type name, in column order; `""` where the driver does not know it. |
 
 Cancelling while the query executes interrupts it in the driver (sqlite
@@ -176,7 +177,7 @@ generation (and one that has no let-go form at all):
   (the `...Context` methods all three share) is what lets `execute!`
   work identically on a pool, in a transaction, and on a session.
 - **A `context.Context`.** let-go cannot build one, so `Ctx` wraps a
-  cancellable context and `QueryCtx`/`ExecCtx`/`Conn` take it, or
+  cancellable context and `QueryCtx`/`ExecCtx`/`ConnCtx` take it, or
   `context.Background()`, on the caller's behalf.
 
 Values cross the boundary as plain `[]any` in both directions; let-go's
