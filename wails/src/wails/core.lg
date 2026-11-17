@@ -30,8 +30,10 @@
    :mac-title-bar (macOS only: :default, :hidden, :hidden-inset,
    :hidden-inset-unified or :hidden-inset-compact; a hidden one lets the
    page draw under the traffic lights), :start-state (:normal, :maximised
-   or :fullscreen, the state it opens in). An unknown :mac-title-bar or
-   :start-state throws."
+   or :fullscreen, the state it opens in), :x and :y (the top-left corner,
+   in the units bounds answers; both or neither, and without them the
+   window centres). An unknown :mac-title-bar or :start-state, or half a
+   position, throws."
   [app opts]
   (shim/NewWindow app opts))
 
@@ -66,6 +68,34 @@
    so check this first."
   [win]
   (shim/IsFullscreen win))
+
+(defn- keywordize [m]
+  (when m (into {} (map (fn [[k v]] [(keyword k) v])) m)))
+
+(defn bounds
+  "The window's frame, {:x :y :width :height}: its top-left corner and its
+   size. On macOS these are points from the primary screen's top-left
+   corner. All zero once the window is gone, and always in server mode."
+  [win]
+  (keywordize (shim/Bounds win)))
+
+(defn set-bounds!
+  "Give the window the frame `frame`, {:x :y :width :height}, in the units
+   bounds answers. It is sized first and then moved, so the top-left corner
+   lands where asked even when the height changes. Does nothing in server
+   mode."
+  [win {:keys [x y width height]}]
+  (shim/SetBounds win (long x) (long y) (long width) (long height))
+  nil)
+
+(defn work-area
+  "The work area of the screen the window is on, {:x :y :width :height}:
+   the screen less the menu bar and the Dock, in the units bounds answers.
+   A window on no screen (its display was unplugged) gets the primary
+   screen's. nil when neither is known, and always in server mode. Call it
+   once the window runs: before that no screen is known."
+  [win]
+  (keywordize (shim/WorkArea win)))
 
 (defn on-main!
   "Run `f`, a fn of no args, on the main thread and wait for it. The window
@@ -194,9 +224,6 @@
 ;; only an update signed like the installed copy goes in. Installing works
 ;; for a Developer ID-signed .app on macOS; can-install-update says why
 ;; not elsewhere.
-
-(defn- keywordize [m]
-  (when m (into {} (map (fn [[k v]] [(keyword k) v])) m)))
 
 (defn updater-init!
   "Configure the updater for GitHub Releases. opts: :current-version
