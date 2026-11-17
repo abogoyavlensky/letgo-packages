@@ -38,6 +38,14 @@
   (doseq [v [:normal :maximised :fullscreen "maximised"]]
     (is (some? (w/new-window (t/app) {:hidden true :start-state v})) (str v))))
 
+(deftest new-window-takes-a-position
+  (is (some? (w/new-window (t/app) {:hidden true :x 10 :y 20}))))
+
+(deftest new-window-refuses-half-a-position
+  (is (str/includes? (new-window-error {:hidden true :x 10}) ":x"))
+  (is (str/includes? (new-window-error {:hidden true :y 20}) ":x"))
+  (is (str/includes? (new-window-error {:hidden true :x "left" :y 20}) ":x")))
+
 (deftest new-window-refuses-an-unknown-start-state
   (is (str/includes? (new-window-error {:hidden true :start-state :sideways}) ":start-state"))
   (is (str/includes? (new-window-error {:hidden true :start-state 1}) ":start-state")))
@@ -53,6 +61,12 @@
   (let [win (t/win)]
     (is (false? (w/maximised? win)))
     (is (false? (w/fullscreen? win)))))
+
+(deftest a-server-mode-window-has-no-bounds-and-no-work-area
+  (let [win (t/win)]
+    (is (= {:x 0 :y 0 :width 0 :height 0} (w/bounds win)))
+    (is (nil? (w/set-bounds! win {:x 1 :y 2 :width 300 :height 200})))
+    (is (nil? (w/work-area win)))))
 
 (deftest on-main-runs-the-fn
   (let [ran (promise)

@@ -47,7 +47,31 @@ func NewWindow(app *application.App, opts vm.Value) (*application.WebviewWindow,
 		return nil, err
 	}
 	o.StartState = state
+	if err := position(opts, &o); err != nil {
+		return nil, err
+	}
 	return app.Window.NewWithOptions(o), nil
+}
+
+// position reads :x and :y, the window's top-left corner in Wails'
+// coordinates (on macOS, points from the primary screen's top-left). Both
+// or neither: without them the window centres, as Wails does by default.
+// optInt answers false for a missing key and for a non-integer alike, so
+// presence is checked first.
+func position(opts vm.Value, o *application.WebviewWindowOptions) error {
+	hasX, hasY := opt(opts, "x") != nil, opt(opts, "y") != nil
+	if !hasX && !hasY {
+		return nil
+	}
+	x, okX := optInt(opts, "x")
+	y, okY := optInt(opts, "y")
+	if !hasX || !hasY || !okX || !okY {
+		return fmt.Errorf("new-window: :x and :y go together, both integers; got :x %v :y %v",
+			opt(opts, "x"), opt(opts, "y"))
+	}
+	o.X, o.Y = x, y
+	o.InitialPosition = application.WindowXY
+	return nil
 }
 
 // macTitleBar maps :mac-title-bar to one of Wails' title bar presets. With
@@ -130,6 +154,50 @@ func SetZoom(w *application.WebviewWindow, level float64) { w.SetZoom(level) }
 
 func IsMaximised(w *application.WebviewWindow) bool  { return w.IsMaximised() }
 func IsFullscreen(w *application.WebviewWindow) bool { return w.IsFullscreen() }
+
+// Bounds is the window's frame: its top-left corner and its size, in the
+// units SetBounds takes. All zero in server mode and once the window is
+// gone.
+func Bounds(w *application.WebviewWindow) (vm.Value, error) {
+	return rectValue(w.Bounds())
+}
+
+// SetBounds sizes the window and then moves it. Wails' own SetBounds
+// moves first, using the old height, and on macOS then resizes from the
+// bottom-left corner, so a change in height would move the top edge.
+// windowSetSize animates synchronously, so the move lands after it.
+func SetBounds(w *application.WebviewWindow, x, y, width, height int) {
+	w.SetSize(width, height)
+	w.SetPosition(x, y)
+}
+
+// WorkArea is the work area of the screen the window is on, in the units
+// of Bounds: on macOS the screen less the menu bar and the Dock, on Linux
+// the whole monitor (see screen_other.go). A window on no
+// screen - its display was unplugged - gets the primary screen's. nil when
+// neither is known, which is always so in server mode.
+func WorkArea(w *application.WebviewWindow) (vm.Value, error) {
+	if s, err := w.GetScreen(); err == nil && s != nil {
+		if area := windowWorkArea(s); area.Width > 0 && area.Height > 0 {
+			return rectValue(area)
+		}
+	}
+	// The cached list is already in DIPs (screenmanager's applyDPIScaling),
+	// so the primary screen's work area is used as it is.
+	if app := application.Get(); app != nil {
+		if p := app.Screen.GetPrimary(); p != nil && p.WorkArea.Width > 0 {
+			return rectValue(p.WorkArea)
+		}
+	}
+	return vm.NIL, nil
+}
+
+func rectValue(r application.Rect) (vm.Value, error) {
+	return FromJSON(map[string]any{
+		"x": float64(r.X), "y": float64(r.Y),
+		"width": float64(r.Width), "height": float64(r.Height),
+	})
+}
 
 // InvokeSync runs fn on the main thread and waits for it. Wails' own
 // methods hop there by themselves; this is for anything else that must

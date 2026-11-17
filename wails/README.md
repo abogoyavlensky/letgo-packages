@@ -86,10 +86,13 @@ Options maps take keyword or string keys alike (`{:title "x"}` or
 | | |
 |---|---|
 | `(new-app opts)` | Build the application. `:name`, `:description`, `:assets` (resource prefix, preferred), `:assets-dir` (cwd-relative dir), `:quit-on-last-window-closed`, `:on-shutdown` (fn). |
-| `(new-window app opts)` | Open a window and return it. `:title`, `:width`, `:height`, `:min-width`, `:min-height`, `:url`, `:hidden`, `:mac-title-bar` (below), `:start-state` (`:normal`, `:maximised` or `:fullscreen`, the state it opens in). |
+| `(new-window app opts)` | Open a window and return it. `:title`, `:width`, `:height`, `:min-width`, `:min-height`, `:url`, `:hidden`, `:mac-title-bar` (below), `:start-state` (`:normal`, `:maximised` or `:fullscreen`, the state it opens in), `:x` and `:y` (the top-left corner, in the units `bounds` answers; both or neither, and without them the window centres). |
 | `(set-title! win s)` `(show! win)` `(hide! win)` `(close! win)` `(focus! win)` `(reload! win)` `(exec-js! win js)` | Window controls. Safe from any thread: Wails moves each onto the main thread. |
 | `(set-zoom! win level)` | Zoom the whole page: 1.0 is 100%. Wails clamps it to at least 1.0. Call it once the window runs: before `run!`, macOS never applies the level. |
 | `(maximised? win)` `(fullscreen? win)` | The window's state. False once the window is gone, and always in server mode. |
+| `(bounds win)` | The window's frame, `{:x :y :width :height}`. On macOS, points from the primary screen's top-left corner. All zero once the window is gone, and always in server mode. |
+| `(set-bounds! win frame)` | Give the window that frame. It is sized first and then moved, so the top-left corner lands where asked. |
+| `(work-area win)` | The work area of the window's screen, in the units of `bounds`: on macOS less the menu bar and the Dock, on Linux the whole monitor (Wails reports GTK's monitor geometry); the primary screen's when the window is on none. nil when neither is known, and always in server mode. |
 | `(on-main! f)` | Run `f` on the main thread and wait, for anything else that must run there. |
 | `(handler! name f)` | Register `f` (a fn or a var) as the handler the frontend reaches by `name`. |
 | `(emit! app name data)` | Send an event to the frontend. |
