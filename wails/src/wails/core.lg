@@ -90,9 +90,10 @@
 
 (defn work-area
   "The work area of the screen the window is on, {:x :y :width :height}:
-   the screen less the menu bar and the Dock, in the units bounds answers.
-   A window on no screen (its display was unplugged) gets the primary
-   screen's. nil when neither is known, and always in server mode. Call it
+   on macOS the screen less the menu bar and the Dock, in the units bounds
+   answers. On Linux it is the whole monitor, panels included: Wails
+   reports GTK's monitor geometry there. A window on no screen (its
+   display was unplugged) gets the primary screen's. nil when neither is known, and always in server mode. Call it
    once the window runs: before that no screen is known."
   [win]
   (keywordize (shim/WorkArea win)))

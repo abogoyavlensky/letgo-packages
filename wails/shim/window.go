@@ -171,8 +171,9 @@ func SetBounds(w *application.WebviewWindow, x, y, width, height int) {
 	w.SetPosition(x, y)
 }
 
-// WorkArea is the work area (the screen less the menu bar and the Dock) of
-// the screen the window is on, in the units of Bounds. A window on no
+// WorkArea is the work area of the screen the window is on, in the units
+// of Bounds: on macOS the screen less the menu bar and the Dock, on Linux
+// the whole monitor (see screen_other.go). A window on no
 // screen - its display was unplugged - gets the primary screen's. nil when
 // neither is known, which is always so in server mode.
 func WorkArea(w *application.WebviewWindow) (vm.Value, error) {

@@ -92,7 +92,7 @@ Options maps take keyword or string keys alike (`{:title "x"}` or
 | `(maximised? win)` `(fullscreen? win)` | The window's state. False once the window is gone, and always in server mode. |
 | `(bounds win)` | The window's frame, `{:x :y :width :height}`. On macOS, points from the primary screen's top-left corner. All zero once the window is gone, and always in server mode. |
 | `(set-bounds! win frame)` | Give the window that frame. It is sized first and then moved, so the top-left corner lands where asked. |
-| `(work-area win)` | The work area of the window's screen (less the menu bar and the Dock), in the units of `bounds`; the primary screen's when the window is on none. nil when neither is known, and always in server mode. |
+| `(work-area win)` | The work area of the window's screen, in the units of `bounds`: on macOS less the menu bar and the Dock, on Linux the whole monitor (Wails reports GTK's monitor geometry); the primary screen's when the window is on none. nil when neither is known, and always in server mode. |
 | `(on-main! f)` | Run `f` on the main thread and wait, for anything else that must run there. |
 | `(handler! name f)` | Register `f` (a fn or a var) as the handler the frontend reaches by `name`. |
 | `(emit! app name data)` | Send an event to the frontend. |
