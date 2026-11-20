@@ -188,8 +188,30 @@ folder the user can write to; otherwise it carries a `:reason`. A second
 An item is `{:separator true}`, `{:role r}`, or `{:label s}` with either
 `:items` (a submenu) or `:on-click` (a fn of no args) plus an optional
 `:accelerator`. Roles: `:app-menu :file-menu :edit-menu :view-menu
-:window-menu :help-menu :quit :about :close-window :reload`. A malformed
-spec throws with the item's path, e.g. `menu spec [1 :items 0 :role]`.
+:window-menu :help-menu :quit :about :close-window :reload :services-menu
+:hide :hide-others :show-all`. A malformed spec throws with the item's
+path, e.g. `menu spec [1 :items 0 :role]`.
+
+`:app-menu` is Wails' fixed application menu (About, Services, Hide, Hide
+Others, Show All, Quit) and takes no items of yours. For an About of your
+own or a Settings… item, build the menu yourself: on macOS the first
+top-level menu is the application menu, whatever its label.
+
+```clojure
+{:label "My App"
+ :items [{:label "About My App" :on-click #'about!}
+         {:label "Settings…" :accelerator "CmdOrCtrl+," :on-click #'settings!}
+         {:separator true}
+         {:role :services-menu}
+         {:separator true}
+         {:role :hide} {:role :hide-others} {:role :show-all}
+         {:separator true}
+         {:role :quit}]}
+```
+
+`:services-menu`, `:hide`, `:hide-others` and `:show-all` are macOS roles:
+on Linux and Windows Wails still makes the items, but they do nothing, so
+add them on macOS only.
 
 ### Values across the boundary
 

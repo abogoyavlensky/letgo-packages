@@ -36,6 +36,15 @@ var menuRoles = map[string]application.Role{
 	"about":        application.About,
 	"close-window": application.CloseWindow,
 	"reload":       application.Reload,
+	// The rest of Wails' fixed :app-menu, so an app can build its own
+	// application menu (the first top-level menu on macOS, whatever its
+	// label) with items of its own. macOS only: elsewhere Wails makes the
+	// items, but they do nothing. :show-all is ShowAll, not UnHide: Wails
+	// gives UnHide no macOS selector, so its item would do nothing.
+	"services-menu": application.ServicesMenu,
+	"hide":          application.Hide,
+	"hide-others":   application.HideOthers,
+	"show-all":      application.ShowAll,
 }
 
 // buildMenu builds a Wails menu from a spec. An error names the path of
@@ -174,4 +183,5 @@ func at(path []string, seg string) []string {
 }
 
 const knownRoles = ":app-menu :file-menu :edit-menu :view-menu :window-menu " +
-	":help-menu :quit :about :close-window :reload"
+	":help-menu :quit :about :close-window :reload " +
+	":services-menu :hide :hide-others :show-all"

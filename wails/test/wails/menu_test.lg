@@ -58,3 +58,22 @@
   (is (str/includes? (try (w/set-menu! (t/app) [{:role :nope}]) ""
                           (catch e (ex-message e)))
                      ":nope")))
+
+;; An app's own macOS application menu: the first top-level menu, whatever
+;; its label, built from the roles Wails' fixed :app-menu uses.
+(deftest an-own-app-menu-builds-from-its-roles
+  (t/app)
+  (is (true? (w/check-menu
+              [{:label "App"
+                :items [{:label "About App" :on-click (fn [] nil)}
+                        {:separator true}
+                        {:role :services-menu}
+                        {:separator true}
+                        {:role :hide} {:role :hide-others} {:role :show-all}
+                        {:separator true}
+                        {:role :quit}]}]))))
+
+(deftest the-unknown-role-error-lists-the-app-menu-roles
+  (let [msg (error-of [{:role :nope}])]
+    (doseq [r [":services-menu" ":hide" ":hide-others" ":show-all"]]
+      (is (str/includes? msg r)))))
